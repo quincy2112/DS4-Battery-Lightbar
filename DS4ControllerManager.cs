@@ -23,7 +23,7 @@ namespace DS4BatteryMapper
                 if (device.Attributes.ProductId != DS4_PID && device.Attributes.ProductId != DS4_PID_2)
                     continue;
 
-                string devicePath = device.Path;
+                string devicePath = device.Path ?? device.Description ?? $"DS4_{device.Attributes.ProductId}";
 
                 // Reuse existing controller or create new one
                 if (!_controllers.ContainsKey(devicePath))

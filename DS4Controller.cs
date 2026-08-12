@@ -29,7 +29,7 @@ namespace DS4BatteryMapper
                     _device.OpenDevice();
 
                 var data = _device.Read();
-                if (data.Status && data.Data.Length > 0)
+                if (data.Status == HidDeviceData.ReadStatus.Success && data.Data.Length > 0)
                 {
                     _lastInputReport = data.Data;
                     // Battery level is in byte 12 (0-indexed)

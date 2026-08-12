@@ -8,8 +8,8 @@ namespace DS4BatteryMapper
 {
     public partial class MainForm : Form
     {
-        private DS4ControllerManager _controllerManager;
-        private Timer _updateTimer;
+        private DS4ControllerManager? _controllerManager;
+        private Timer? _updateTimer;
 
         public MainForm()
         {
@@ -17,6 +17,11 @@ namespace DS4BatteryMapper
             _controllerManager = new DS4ControllerManager();
             InitializeUI();
             StartMonitoring();
+        }
+
+        private void InitializeComponent()
+        {
+            // WinForms designer placeholder - all UI initialized in InitializeUI
         }
 
         private void InitializeUI()
@@ -65,12 +70,15 @@ namespace DS4BatteryMapper
         private void StartMonitoring()
         {
             _updateTimer = new Timer { Interval = 500 };
-            _updateTimer.Tick += UpdateControllerStatus;
+            _updateTimer.Tick += UpdateControllerStatus!;
             _updateTimer.Start();
         }
 
-        private void UpdateControllerStatus(object sender, EventArgs e)
+        private void UpdateControllerStatus(object? sender, EventArgs e)
         {
+            if (_controllerManager == null)
+                return;
+
             var controllers = _controllerManager.GetConnectedControllers();
             var controllerPanel = this.Controls["ControllerPanel"] as Panel;
             
