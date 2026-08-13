@@ -24,7 +24,7 @@ namespace DS4BatteryMapper
         private Dictionary<string, Panel> _controllerUIPanels = new Dictionary<string, Panel>();
         private NotifyIcon? _trayIcon;
         private ContextMenuStrip? _trayMenu;
-        private bool _isClosing = false;
+        private bool _allowClose = false;
 
         public MainForm()
         {
@@ -182,18 +182,21 @@ namespace DS4BatteryMapper
         private void ShowWindow()
         {
             Trace.WriteLine("[MainForm] ShowWindow called");
-            _isClosing = false;
+            _allowClose = false;
             this.WindowState = FormWindowState.Normal;
             this.Show();
             this.Activate();
             this.Focus();
-            Trace.WriteLine("[MainForm] ShowWindow complete, window should be visible");
+            
+            // Allow close only after a brief delay to avoid race condition with tray menu
+            Task.Delay(200).ContinueWith(_ => _allowClose = true);
+            Trace.WriteLine("[MainForm] ShowWindow complete");
         }
 
         private void ExitApplication()
         {
             Trace.WriteLine("[MainForm] ExitApplication called");
-            _isClosing = true;
+            _allowClose = true;
             // Properly dispose before exiting
             _uiTimer?.Stop();
             _uiTimer?.Dispose();
@@ -526,9 +529,9 @@ namespace DS4BatteryMapper
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            Trace.WriteLine($"[MainForm] OnFormClosing: CloseReason={e.CloseReason}, _isClosing={_isClosing}");
+            Trace.WriteLine($"[MainForm] OnFormClosing: CloseReason={e.CloseReason}, _allowClose={_allowClose}");
             
-            if (!_isClosing && e.CloseReason == CloseReason.UserClosing)
+            if (!_allowClose && e.CloseReason == CloseReason.UserClosing)
             {
                 // Minimize to tray instead of closing
                 e.Cancel = true;
@@ -536,9 +539,9 @@ namespace DS4BatteryMapper
                 this.Hide();
                 Trace.WriteLine("[MainForm] Hiding window to tray");
             }
-            else if (_isClosing)
+            else if (_allowClose)
             {
-                // Allow exit on explicit close
+                // Allow exit
                 _uiTimer?.Stop();
                 _uiTimer?.Dispose();
                 _pollTimer?.Stop();
