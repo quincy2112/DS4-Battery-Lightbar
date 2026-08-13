@@ -24,6 +24,7 @@ namespace DS4BatteryMapper
         private Dictionary<string, Panel> _controllerUIPanels = new Dictionary<string, Panel>();
         private NotifyIcon? _trayIcon;
         private ContextMenuStrip? _trayMenu;
+        private bool _isClosing = false;
 
         public MainForm()
         {
@@ -180,17 +181,19 @@ namespace DS4BatteryMapper
 
         private void ShowWindow()
         {
-            // Restore window size and position
-            this.Size = new Size(650, 900);
-            this.StartPosition = FormStartPosition.CenterScreen;
+            Trace.WriteLine("[MainForm] ShowWindow called");
+            _isClosing = false;
             this.WindowState = FormWindowState.Normal;
             this.Show();
             this.Activate();
             this.Focus();
+            Trace.WriteLine("[MainForm] ShowWindow complete, window should be visible");
         }
 
         private void ExitApplication()
         {
+            Trace.WriteLine("[MainForm] ExitApplication called");
+            _isClosing = true;
             // Properly dispose before exiting
             _uiTimer?.Stop();
             _uiTimer?.Dispose();
@@ -523,16 +526,19 @@ namespace DS4BatteryMapper
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (e.CloseReason == CloseReason.UserClosing)
+            Trace.WriteLine($"[MainForm] OnFormClosing: CloseReason={e.CloseReason}, _isClosing={_isClosing}");
+            
+            if (!_isClosing && e.CloseReason == CloseReason.UserClosing)
             {
                 // Minimize to tray instead of closing
                 e.Cancel = true;
                 this.WindowState = FormWindowState.Minimized;
                 this.Hide();
+                Trace.WriteLine("[MainForm] Hiding window to tray");
             }
-            else
+            else if (_isClosing)
             {
-                // Allow exit on other close reasons
+                // Allow exit on explicit close
                 _uiTimer?.Stop();
                 _uiTimer?.Dispose();
                 _pollTimer?.Stop();
@@ -540,6 +546,7 @@ namespace DS4BatteryMapper
                 _controllerManager?.Dispose();
                 _trayIcon?.Dispose();
                 _trayMenu?.Dispose();
+                Trace.WriteLine("[MainForm] Allowing application exit");
             }
         }
     }
