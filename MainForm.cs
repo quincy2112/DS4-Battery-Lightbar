@@ -46,15 +46,15 @@ namespace DS4BatteryMapper
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 100,  // Reduced from 120, enough for title + color pickers
+                Height = 80,  // Minimal height for title + color pickers
                 BackColor = Color.FromArgb(45, 45, 48)
             };
 
             var titleLabel = new Label
             {
                 Text = "Connected DS4 Controllers",
-                Location = new Point(10, 10),
-                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                Location = new Point(10, 5),
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
                 AutoSize = true,
                 ForeColor = Color.White
             };
@@ -63,7 +63,7 @@ namespace DS4BatteryMapper
             var refreshBtn = new Button
             {
                 Text = "Refresh",
-                Location = new Point(480, 10),
+                Location = new Point(480, 5),
                 Size = new Size(80, 28),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
@@ -77,28 +77,30 @@ namespace DS4BatteryMapper
 
             var lowBatteryLabel = new Label
             {
-                Text = "Low Battery Color (0%)",
-                Location = new Point(10, 45),
-                Size = new Size(160, 20),
+                Text = "Low Battery:",
+                Location = new Point(10, 35),
+                Size = new Size(90, 15),
+                Font = new Font("Segoe UI", 8),
                 ForeColor = Color.White
             };
             topPanel.Controls.Add(lowBatteryLabel);
 
             _lowBatteryColorButton = CreateColorButton(_lowBatteryColor, (s, e) => SelectGradientColor(true));
-            _lowBatteryColorButton.Location = new Point(175, 42);
+            _lowBatteryColorButton.Location = new Point(105, 35);
             topPanel.Controls.Add(_lowBatteryColorButton);
 
             var highBatteryLabel = new Label
             {
-                Text = "High Battery Color (100%)",
-                Location = new Point(280, 45),
-                Size = new Size(170, 20),
+                Text = "High Battery:",
+                Location = new Point(160, 35),
+                Size = new Size(90, 15),
+                Font = new Font("Segoe UI", 8),
                 ForeColor = Color.White
             };
             topPanel.Controls.Add(highBatteryLabel);
 
             _highBatteryColorButton = CreateColorButton(_highBatteryColor, (s, e) => SelectGradientColor(false));
-            _highBatteryColorButton.Location = new Point(455, 42);
+            _highBatteryColorButton.Location = new Point(255, 35);
             topPanel.Controls.Add(_highBatteryColorButton);
 
             // Use FlowLayoutPanel for automatic layout of multiple controllers
