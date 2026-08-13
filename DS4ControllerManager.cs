@@ -13,16 +13,13 @@ namespace DS4BatteryMapper
     public class DS4ControllerManager : IDisposable
     {
         private readonly object _lock = new object();
-        // keyed by dedupe key (bluetooth address or device path fallback)
+        // keyed by device mac address or unique identifier extracted from the device path
         private readonly Dictionary<string, DS4Controller> _controllers = new Dictionary<string, DS4Controller>(StringComparer.OrdinalIgnoreCase);
 
         public DS4ControllerManager()
         {
         }
 
-        // Lightweight enumeration that deduplicates multiple HID collections that belong to the same physical device.
-        // Returns the current set of DS4Controller objects (reused across calls when possible).
-        // Also removes stale/unhealthy controllers from the cache.
         public List<DS4Controller> GetConnectedControllers()
         {
             var log = new List<string>();
@@ -46,18 +43,16 @@ namespace DS4BatteryMapper
 
                         log.Add($"[DS4Manager] Device: {desc}, VID: 0x{vid:X4}, PID: 0x{pid:X4}, Path={path}, IsConnected={isConn}");
 
-                        // Recognize DS4 by VID/PID for Sony (0x054C: PlayStation) and DS4 wireless PID 0x09CC
+                        // Recognize DS4 by VID/PID
                         if (vid == 0x054C && (pid == 0x09CC || pid == 0x09C0 || pid == 0x05C4))
                         {
-                            // Test read with timeout to verify device is actually functional
+                            // Test read with timeout to verify device is functional
                             bool isHealthy = false;
                             try
                             {
                                 if (!d.IsOpen)
                                     d.OpenDevice();
 
-                                // Use a task with timeout to avoid blocking on ghost devices
-                                // 2000ms timeout allows responsive controllers to answer
                                 var testReadTask = Task.Run(() => d.Read());
                                 if (testReadTask.Wait(TimeSpan.FromMilliseconds(2000)))
                                 {
@@ -65,7 +60,6 @@ namespace DS4BatteryMapper
                                     if (testRead.Status == HidDeviceData.ReadStatus.Success && testRead.Data.Length > 0)
                                     {
                                         byte reportId = testRead.Data[0];
-                                        // Accept only valid report IDs (0x01 for USB, 0x11 for Bluetooth)
                                         if (reportId == 0x01 || reportId == 0x11)
                                         {
                                             isHealthy = true;
@@ -97,8 +91,9 @@ namespace DS4BatteryMapper
                                 continue;
                             }
 
-                            // extract a dedupe key (prefer Bluetooth address-like substring if present)
-                            var key = ExtractDeviceKey(path) ?? path;
+                            // Extract MAC address from device path for deduplication
+                            // Bluetooth paths typically contain a MAC address-like pattern
+                            var key = ExtractMacAddress(path) ?? ExtractDeviceKey(path) ?? path;
                             log.Add($"[DS4Manager] Extracted key: {key}");
                             foundKeys.Add(key);
 
@@ -117,7 +112,6 @@ namespace DS4BatteryMapper
                             }
                             else
                             {
-                                // Reuse existing controller
                                 log.Add($"[DS4Manager] Reusing existing controller for {path}");
                             }
 
@@ -139,7 +133,6 @@ namespace DS4BatteryMapper
                     _controllers.Remove(key);
                 }
 
-                // Build the result list from the dictionary values
                 var result = new List<DS4Controller>();
                 lock (_lock)
                 {
@@ -148,7 +141,6 @@ namespace DS4BatteryMapper
 
                 log.Add($"[DS4Manager] Returning {result.Count} controller(s) (total cached: {_controllers.Count})");
 
-                // Persist device enumeration for debugging
                 try
                 {
                     File.WriteAllText("ds4-devices.log", string.Join(Environment.NewLine, log));
@@ -168,23 +160,34 @@ namespace DS4BatteryMapper
             }
         }
 
-        // Extract device key from the Bluetooth device path.
-        // Bluetooth paths look like: ...#9&22f644e1&0&0000#... or ...#9&19db4fb2&a&0000#...
-        // We want to extract the unique hardware identifier (the 8-hex part after #9&)
+        // Extract MAC address (format: XX:XX:XX:XX:XX:XX or variations with underscores)
+        private string? ExtractMacAddress(string devicePath)
+        {
+            if (string.IsNullOrEmpty(devicePath)) return null;
+
+            // Look for patterns like "vid&0002054c_pid&09cc#9&22f644e1_0_0000" where 22f644e1 is a unique ID
+            // or Bluetooth addresses in format XX:XX:XX:XX:XX:XX, XX_XX_XX_XX_XX_XX, etc.
+            var m = Regex.Match(devicePath, @"_([0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2})_", RegexOptions.IgnoreCase);
+            if (m.Success && m.Groups.Count > 1)
+            {
+                return m.Groups[1].Value.ToLowerInvariant();
+            }
+
+            return null;
+        }
+
+        // Extract device key from the path (8-hex identifier after #9&)
         private string? ExtractDeviceKey(string devicePath)
         {
             if (string.IsNullOrEmpty(devicePath)) return null;
 
-            // For Bluetooth devices, the pattern is: #9&<unique_id>&<something>&0000#
-            // Extract the first 8-hex after #9&
             var m = Regex.Match(devicePath, @"#9&([0-9A-Fa-f]{8})&");
             if (m.Success && m.Groups.Count > 1)
             {
                 return m.Groups[1].Value.ToLowerInvariant();
             }
 
-            // Fallback: use the full path as unique key if regex doesn't match
-            return devicePath.ToLowerInvariant();
+            return null;
         }
 
         public void Dispose()

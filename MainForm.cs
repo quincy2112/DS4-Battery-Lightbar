@@ -296,37 +296,48 @@ namespace DS4BatteryMapper
         {
             if (_controllerPanel == null) return;
 
-            _controllerPanel.Controls.Clear();
+            // Suspend layout to prevent flashing during updates
+            _controllerPanel.SuspendLayout();
 
-            if (controllers == null || controllers.Count == 0)
+            try
             {
-                var noLabel = new Label
+                _controllerPanel.Controls.Clear();
+
+                if (controllers == null || controllers.Count == 0)
                 {
-                    Text = "No DS4 controllers detected",
-                    AutoSize = true,
-                    ForeColor = Color.Gray,
-                    Font = new Font("Segoe UI", 10)
-                };
-                _controllerPanel.Controls.Add(noLabel);
+                    var noLabel = new Label
+                    {
+                        Text = "No DS4 controllers detected",
+                        AutoSize = true,
+                        ForeColor = Color.Gray,
+                        Font = new Font("Segoe UI", 10)
+                    };
+                    _controllerPanel.Controls.Add(noLabel);
+                    if (_statusLabel != null)
+                        _statusLabel.Text = "No DS4 controllers detected";
+                    return;
+                }
+
+                foreach (var controller in controllers)
+                {
+                    try
+                    {
+                        _controllerPanel.Controls.Add(CreateControllerUI(controller));
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.WriteLine("[MainForm] Error creating controller UI: " + ex);
+                    }
+                }
+
                 if (_statusLabel != null)
-                    _statusLabel.Text = "No DS4 controllers detected";
-                return;
+                    _statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
             }
-
-            foreach (var controller in controllers)
+            finally
             {
-                try
-                {
-                    _controllerPanel.Controls.Add(CreateControllerUI(controller));
-                }
-                catch (Exception ex)
-                {
-                    Trace.WriteLine("[MainForm] Error creating controller UI: " + ex);
-                }
+                // Resume layout and trigger single refresh
+                _controllerPanel.ResumeLayout(true);
             }
-
-            if (_statusLabel != null)
-                _statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
         }
 
         private Panel CreateControllerUI(DS4Controller controller)
