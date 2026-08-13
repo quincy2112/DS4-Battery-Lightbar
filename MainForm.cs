@@ -36,7 +36,7 @@ namespace DS4BatteryMapper
         private void InitializeUI()
         {
             this.Text = "DS4 Battery Lightbar Mapper";
-            this.Size = new Size(600, 460);
+            this.Size = new Size(600, 700);  // Increased height to accommodate multiple controllers
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(45, 45, 48);
             this.ForeColor = Color.White;
@@ -46,13 +46,14 @@ namespace DS4BatteryMapper
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 80,
+                Height = 120,  // Increased from 80 to give more space for color pickers
                 BackColor = Color.FromArgb(45, 45, 48)
             };
 
             var titleLabel = new Label
             {
                 Text = "Connected DS4 Controllers",
+                Location = new Point(10, 10),
                 Font = new Font("Segoe UI", 14, FontStyle.Bold),
                 AutoSize = true,
                 ForeColor = Color.White
@@ -77,27 +78,27 @@ namespace DS4BatteryMapper
             var lowBatteryLabel = new Label
             {
                 Text = "Low Battery Color (0%)",
-                Location = new Point(10, 45),
+                Location = new Point(10, 50),
                 Size = new Size(160, 20),
                 ForeColor = Color.White
             };
             topPanel.Controls.Add(lowBatteryLabel);
 
             _lowBatteryColorButton = CreateColorButton(_lowBatteryColor, (s, e) => SelectGradientColor(true));
-            _lowBatteryColorButton.Location = new Point(175, 42);
+            _lowBatteryColorButton.Location = new Point(175, 47);
             topPanel.Controls.Add(_lowBatteryColorButton);
 
             var highBatteryLabel = new Label
             {
                 Text = "High Battery Color (100%)",
-                Location = new Point(280, 45),
+                Location = new Point(280, 50),
                 Size = new Size(170, 20),
                 ForeColor = Color.White
             };
             topPanel.Controls.Add(highBatteryLabel);
 
             _highBatteryColorButton = CreateColorButton(_highBatteryColor, (s, e) => SelectGradientColor(false));
-            _highBatteryColorButton.Location = new Point(455, 42);
+            _highBatteryColorButton.Location = new Point(455, 47);
             topPanel.Controls.Add(_highBatteryColorButton);
 
             // Use FlowLayoutPanel for automatic layout of multiple controllers
