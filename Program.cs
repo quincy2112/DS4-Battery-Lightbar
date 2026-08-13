@@ -1,6 +1,7 @@
 using System;
 using System.Windows.Forms;
 using System.Diagnostics;
+using System.IO;
 
 namespace DS4BatteryMapper
 {
@@ -9,16 +10,18 @@ namespace DS4BatteryMapper
         [STAThread]
         static void Main()
         {
-            // Attach a console trace listener so logs appear when running from PowerShell/Command Prompt
             try
             {
+                // Attach console and file trace listeners so Trace.WriteLine output appears
                 Trace.Listeners.Add(new TextWriterTraceListener(Console.Out));
+                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "ds4.log");
+                Trace.Listeners.Add(new TextWriterTraceListener(logPath));
                 Trace.AutoFlush = true;
-                Console.WriteLine("Console trace listener attached: Trace.WriteLine will appear in the console.");
+                Console.WriteLine($"Trace listeners attached: console and {logPath}");
             }
             catch (Exception)
             {
-                // Ignore if attaching a listener fails
+                // ignore if unable to attach listeners
             }
 
             Application.EnableVisualStyles();

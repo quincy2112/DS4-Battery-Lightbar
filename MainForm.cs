@@ -86,6 +86,8 @@ namespace DS4BatteryMapper
 
             try
             {
+                Trace.WriteLine("[MainForm] UpdateControllerStatus start");
+
                 // Perform enumeration and device I/O on a background thread
                 controllers = await Task.Run(() =>
                 {
@@ -99,7 +101,7 @@ namespace DS4BatteryMapper
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine("[MainForm] Error updating battery (background): " + ex);
+                            Trace.WriteLine("[MainForm] Error updating battery (background): " + ex);
                         }
 
                         try
@@ -110,7 +112,7 @@ namespace DS4BatteryMapper
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine("[MainForm] Error setting lightbar (background): " + ex);
+                            Trace.WriteLine("[MainForm] Error setting lightbar (background): " + ex);
                         }
                     }
 
@@ -119,12 +121,14 @@ namespace DS4BatteryMapper
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("[MainForm] Background controller update failed: " + ex);
+                Trace.WriteLine("[MainForm] Background controller update failed: " + ex);
                 var statusLabelErr = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
                 if (statusLabelErr != null)
                     statusLabelErr.Text = "Error during device update";
                 return;
             }
+
+            Trace.WriteLine($"[MainForm] Background update complete, controllers found: {controllers.Count}");
 
             // UI update must run on UI thread (we're back on UI thread after await)
             var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;

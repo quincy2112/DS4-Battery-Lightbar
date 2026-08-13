@@ -45,7 +45,7 @@ namespace DS4BatteryMapper
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error reading DS4 data: {ex.Message}");
+                Trace.WriteLine($"Error reading DS4 data: {ex.Message}");
             }
         }
 
@@ -53,11 +53,11 @@ namespace DS4BatteryMapper
         {
             try
             {
-                Debug.WriteLine($"SetLightbar called for {DeviceName} with RGB=({red},{green},{blue})");
+                Trace.WriteLine($"SetLightbar called for {DeviceName} with RGB=({red},{green},{blue})");
 
                 if (!_device.IsConnected)
                 {
-                    Debug.WriteLine("SetLightbar: device not connected");
+                    Trace.WriteLine("SetLightbar: device not connected");
                     return;
                 }
 
@@ -68,11 +68,11 @@ namespace DS4BatteryMapper
                 try
                 {
                     var caps = _device.Capabilities;
-                    Debug.WriteLine($"Device capabilities: OutputReportByteLength={caps?.OutputReportByteLength}, FeatureReportByteLength={caps?.FeatureReportByteLength}");
+                    Trace.WriteLine($"Device capabilities: OutputReportByteLength={caps?.OutputReportByteLength}, FeatureReportByteLength={caps?.FeatureReportByteLength}");
                 }
                 catch (Exception) { /* ignore */ }
 
-                // Try Bluetooth-specific 78-byte output report (common for DS4 over BT) first,
+                // Try Bluetooth-specific 78-byte output report first,
                 // then fall back to other lengths/IDs we already attempted.
                 int[] reportLens = new[] { 78, _device.Capabilities?.OutputReportByteLength ?? 32, 32 };
                 byte[] reportIdCandidates = new[] { (byte)0x11, (byte)0x05 };
@@ -117,51 +117,50 @@ namespace DS4BatteryMapper
                                 {
                                     // First try a normal Write
                                     var ok = _device.Write(report);
-                                    Debug.WriteLine($"SetLightbar attempt: len={realLen}, rid=0x{rid:X2}, header=0x{header:X2}, offs={off[0]},{off[1]},{off[2]} -> Write returned {ok}");
+                                    Trace.WriteLine($"SetLightbar attempt: outLen={realLen}, rid=0x{rid:X2}, header=0x{header:X2}, offs={off[0]},{off[1]},{off[2]} -> Write returned {ok}");
                                     if (ok) { wrote = true; break; }
                                 }
                                 catch (Exception wex)
                                 {
-                                    Debug.WriteLine($"SetLightbar Write exception (len={realLen}, rid=0x{rid:X2}): {wex}");
+                                    Trace.WriteLine($"SetLightbar Write exception (outLen={realLen}, rid=0x{rid:X2}): {wex}");
                                 }
 
-                                // Try feature write if available (some BT stacks expect a feature report)
+                                // If Write didn't work or isn't appropriate for this transport, try feature/write-feature methods if available
                                 try
                                 {
+                                    // HidLibrary historically exposes WriteFeatureData or WriteFeature. Use reflection to call if present.
                                     var mi = _device.GetType().GetMethod("WriteFeatureData") ?? _device.GetType().GetMethod("WriteFeature");
                                     if (mi != null)
                                     {
                                         var result = mi.Invoke(_device, new object[] { report });
-                                        Debug.WriteLine($"SetLightbar feature attempt via {mi.Name}: len={realLen}, rid=0x{rid:X2}, offs={off[0]},{off[1]},{off[2]} -> result={result ?? "null"}");
-                                        // We can't always determine success from the reflected call, but assume it attempted
-                                        wrote = true;
+                                        Trace.WriteLine($"SetLightbar attempt via {mi.Name}: outLen={realLen}, rid=0x{rid:X2}, offs={off[0]},{off[1]},{off[2]} -> returned={result ?? "null"}");
+                                        wrote = true; // we attempted - can't always determine success from reflection result shape, assume attempted
                                         break;
                                     }
                                 }
-                                catch (TargetInvocationException tie)
-                                {
-                                    Debug.WriteLine($"SetLightbar feature invocation error: {tie.InnerException?.Message ?? tie.Message}");
-                                }
                                 catch (Exception fim)
                                 {
-                                    Debug.WriteLine($"SetLightbar feature-write exception: {fim}");
+                                    Trace.WriteLine($"SetLightbar feature-write exception: {fim}");
                                 }
                             }
+
                             if (wrote) break;
                         }
+
                         if (wrote) break;
                     }
+
                     if (wrote) break;
                 }
 
                 if (!wrote)
                 {
-                    Debug.WriteLine("SetLightbar: all attempts failed; Bluetooth DS4 likely needs a specific 78-byte structure or the device is controlled by another process.");
+                    Trace.WriteLine("SetLightbar: none of the standard attempts reported success; device may require a different report format or transport-specific handling.");
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"SetLightbar: unexpected error: {ex}");
+                Trace.WriteLine($"SetLightbar: unexpected error: {ex}");
             }
         }
 
