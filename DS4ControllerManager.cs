@@ -57,8 +57,9 @@ namespace DS4BatteryMapper
                                     d.OpenDevice();
 
                                 // Use a task with timeout to avoid blocking on ghost devices
+                                // 2000ms timeout allows responsive controllers to answer
                                 var testReadTask = Task.Run(() => d.Read());
-                                if (testReadTask.Wait(TimeSpan.FromMilliseconds(500)))
+                                if (testReadTask.Wait(TimeSpan.FromMilliseconds(2000)))
                                 {
                                     var testRead = testReadTask.Result;
                                     if (testRead.Status == HidDeviceData.ReadStatus.Success && testRead.Data.Length > 0)
@@ -82,7 +83,7 @@ namespace DS4BatteryMapper
                                 }
                                 else
                                 {
-                                    log.Add($"[DS4Manager] Test read timed out (500ms), skipping device");
+                                    log.Add($"[DS4Manager] Test read timed out (2000ms), skipping device");
                                 }
                             }
                             catch (Exception testEx)
