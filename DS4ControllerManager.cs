@@ -33,7 +33,20 @@ namespace DS4BatteryMapper
                 _debugLog.AppendLine($"\nDevice: {device.Description}");
                 _debugLog.AppendLine($"  VID: 0x{device.Attributes.VendorId:X4}");
                 _debugLog.AppendLine($"  PID: 0x{device.Attributes.ProductId:X4}");
-                _debugLog.AppendLine($"  Serial: {device.SerialNumber}");
+
+                // Safely get an identifier for the device. HidLibrary's HidDevice doesn't expose SerialNumber on all platforms,
+                // so fall back to DevicePath which is always available and unique per device instance.
+                string serial = null;
+                try
+                {
+                    serial = device.DevicePath;
+                }
+                catch
+                {
+                    try { serial = device.ToString(); } catch { serial = null; }
+                }
+
+                _debugLog.AppendLine($"  Serial: {serial}");
 
                 Debug.WriteLine($"[DS4Manager] Device: {device.Description}, VID: 0x{device.Attributes.VendorId:X4}, PID: 0x{device.Attributes.ProductId:X4}");
 
