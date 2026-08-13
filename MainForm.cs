@@ -12,6 +12,7 @@ namespace DS4BatteryMapper
     {
         private DS4ControllerManager? _controllerManager;
         private Timer? _updateTimer;
+        private volatile bool _isUpdating = false; // guard against overlapping updates
 
         public MainForm()
         {
@@ -82,6 +83,15 @@ namespace DS4BatteryMapper
             if (_controllerManager == null)
                 return;
 
+            // Prevent overlapping updates
+            if (_isUpdating)
+            {
+                Trace.WriteLine("[MainForm] UpdateControllerStatus skipped because previous update is still running");
+                return;
+            }
+
+            _isUpdating = true;
+
             List<DS4Controller> controllers = new List<DS4Controller>();
 
             try
@@ -118,6 +128,8 @@ namespace DS4BatteryMapper
 
                     return list;
                 });
+
+                Trace.WriteLine($"[MainForm] Background update complete, controllers found: {controllers.Count}");
             }
             catch (Exception ex)
             {
@@ -127,8 +139,11 @@ namespace DS4BatteryMapper
                     statusLabelErr.Text = "Error during device update";
                 return;
             }
-
-            Trace.WriteLine($"[MainForm] Background update complete, controllers found: {controllers.Count}");
+            finally
+            {
+                _isUpdating = false;
+                Trace.WriteLine("[MainForm] UpdateControllerStatus finished");
+            }
 
             // UI update must run on UI thread (we're back on UI thread after await)
             var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;
