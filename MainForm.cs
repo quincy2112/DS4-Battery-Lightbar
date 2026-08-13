@@ -11,8 +11,10 @@ namespace DS4BatteryMapper
     public partial class MainForm : Form
     {
         private DS4ControllerManager? _controllerManager;
-        private Timer? _updateTimer;
-        private volatile bool _isUpdating = false; // guard against overlapping updates
+        private Timer? _uiTimer;               // frequent UI refresh (no blocking I/O)
+        private Timer? _pollTimer;             // infrequent device polling (battery, lightbar)
+        private volatile bool _isEnumerating = false;
+        private volatile bool _isPolling = false;
 
         public MainForm()
         {
@@ -72,83 +74,127 @@ namespace DS4BatteryMapper
 
         private void StartMonitoring()
         {
-            _updateTimer = new Timer { Interval = 500 };
-            _updateTimer.Tick += UpdateControllerStatus!;
-            _updateTimer.Start();
+            // UI timer: frequent refresh of UI from cached controller objects (no blocking I/O)
+            _uiTimer = new Timer { Interval = 500 };
+            _uiTimer.Tick += UIUpdateTick!;
+            _uiTimer.Start();
+
+            // Poll timer: infrequent (15s) device polling for battery and lightbar writes
+            _pollTimer = new Timer { Interval = 15000 };
+            _pollTimer.Tick += PollControllersTick!;
+            _pollTimer.Start();
+
+            Trace.WriteLine("Monitoring started: UI=500ms, Poll=15000ms");
         }
 
-        // Run device I/O off the UI thread to avoid freezing the form.
-        private async void UpdateControllerStatus(object? sender, EventArgs e)
+        // UI-only update (fast). Enumerates controllers but does not perform blocking reads/writes.
+        private async void UIUpdateTick(object? sender, EventArgs e)
         {
-            if (_controllerManager == null)
-                return;
-
-            // Prevent overlapping updates
-            if (_isUpdating)
+            if (_controllerManager == null) return;
+            if (_isEnumerating)
             {
-                Trace.WriteLine("[MainForm] UpdateControllerStatus skipped because previous update is still running");
+                Trace.WriteLine("[MainForm] UIUpdateTick skipped - enumeration already running");
                 return;
             }
 
-            _isUpdating = true;
-
-            List<DS4Controller> controllers = new List<DS4Controller>();
-
+            _isEnumerating = true;
             try
             {
-                Trace.WriteLine("[MainForm] UpdateControllerStatus start");
+                Trace.WriteLine("[MainForm] UIUpdateTick - enumerating controllers");
+                // Run enumeration on background thread briefly
+                var controllers = await Task.Run(() => _controllerManager.GetConnectedControllers());
 
-                // Perform enumeration and device I/O on a background thread
-                controllers = await Task.Run(() =>
-                {
-                    var list = _controllerManager.GetConnectedControllers();
-
-                    foreach (var controller in list)
-                    {
-                        try
-                        {
-                            controller.UpdateBatteryStatus();
-                        }
-                        catch (Exception ex)
-                        {
-                            Trace.WriteLine("[MainForm] Error updating battery (background): " + ex);
-                        }
-
-                        try
-                        {
-                            var battery = Math.Max(0, Math.Min(100, controller?.BatteryPercentage ?? 0));
-                            var color = BatteryToColor(battery);
-                            controller.SetLightbar((byte)color.R, (byte)color.G, (byte)color.B);
-                        }
-                        catch (Exception ex)
-                        {
-                            Trace.WriteLine("[MainForm] Error setting lightbar (background): " + ex);
-                        }
-                    }
-
-                    return list;
-                });
-
-                Trace.WriteLine($"[MainForm] Background update complete, controllers found: {controllers.Count}");
+                // Update UI with current cached battery values (no blocking calls here)
+                UpdateControllerPanel(controllers);
             }
             catch (Exception ex)
             {
-                Trace.WriteLine("[MainForm] Background controller update failed: " + ex);
-                var statusLabelErr = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
-                if (statusLabelErr != null)
-                    statusLabelErr.Text = "Error during device update";
-                return;
+                Trace.WriteLine("[MainForm] UIUpdateTick error: " + ex);
             }
             finally
             {
-                _isUpdating = false;
-                Trace.WriteLine("[MainForm] UpdateControllerStatus finished");
+                _isEnumerating = false;
+            }
+        }
+
+        // Poll controllers less frequently: perform battery reads and SetLightbar with timeouts
+        private async void PollControllersTick(object? sender, EventArgs e)
+        {
+            if (_controllerManager == null) return;
+            if (_isPolling)
+            {
+                Trace.WriteLine("[MainForm] PollControllersTick skipped - polling already running");
+                return;
             }
 
-            // UI update must run on UI thread (we're back on UI thread after await)
+            _isPolling = true;
+
+            try
+            {
+                Trace.WriteLine("[MainForm] PollControllersTick start");
+                var controllers = await Task.Run(() => _controllerManager.GetConnectedControllers());
+
+                Trace.WriteLine($"[MainForm] PollControllersTick found {controllers.Count} controller(s)");
+
+                foreach (var controller in controllers)
+                {
+                    // Update battery with a 1s timeout
+                    try
+                    {
+                        var batteryTask = Task.Run(() => controller.UpdateBatteryStatus());
+                        var finished = await Task.WhenAny(batteryTask, Task.Delay(1000));
+                        if (finished != batteryTask)
+                        {
+                            Trace.WriteLine($"[MainForm] UpdateBatteryStatus timed out for {controller.DeviceName}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.WriteLine("[MainForm] Error updating battery during poll: " + ex);
+                    }
+
+                    // Set lightbar with a 1s timeout
+                    try
+                    {
+                        var battery = Math.Max(0, Math.Min(100, controller?.BatteryPercentage ?? 0));
+                        var color = BatteryToColor(battery);
+
+                        var lightTask = Task.Run(() => controller.SetLightbar((byte)color.R, (byte)color.G, (byte)color.B));
+                        var finished2 = await Task.WhenAny(lightTask, Task.Delay(1000));
+                        if (finished2 != lightTask)
+                        {
+                            Trace.WriteLine($"[MainForm] SetLightbar timed out for {controller.DeviceName}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.WriteLine("[MainForm] Error setting lightbar during poll: " + ex);
+                    }
+                }
+
+                Trace.WriteLine("[MainForm] PollControllersTick finished");
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[MainForm] PollControllersTick failed: " + ex);
+            }
+            finally
+            {
+                _isPolling = false;
+            }
+        }
+
+        private void UpdateControllerPanel(List<DS4Controller> controllers)
+        {
             var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;
+            var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
+
             if (controllerPanel == null)
+            {
+                Trace.WriteLine("[MainForm] ControllerPanel not found");
+                if (statusLabel != null) statusLabel.Text = "UI error: Controller panel not found";
                 return;
+            }
 
             controllerPanel.Controls.Clear();
 
@@ -163,28 +209,32 @@ namespace DS4BatteryMapper
                 };
                 controllerPanel.Controls.Add(noLabel);
 
-                var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
                 if (statusLabel != null)
-                {
                     statusLabel.Text = "No DS4 controllers detected";
-                }
 
+                Trace.WriteLine("[MainForm] No controllers found (UI)");
                 return;
             }
 
             int yOffset = 10;
             foreach (var controller in controllers)
             {
-                var controllerUI = CreateControllerUI(controller, yOffset);
-                controllerPanel.Controls.Add(controllerUI);
-                yOffset += 130;
+                try
+                {
+                    var controllerUI = CreateControllerUI(controller, yOffset);
+                    controllerPanel.Controls.Add(controllerUI);
+                    yOffset += 130;
+                }
+                catch (Exception uiEx)
+                {
+                    Trace.WriteLine("[MainForm] Error creating controller UI: " + uiEx);
+                }
             }
 
-            var statusLabelFinal = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
-            if (statusLabelFinal != null)
-            {
-                statusLabelFinal.Text = $"Monitoring {controllers.Count} controller(s)";
-            }
+            if (statusLabel != null)
+                statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
+
+            Trace.WriteLine($"[MainForm] Displaying {controllers.Count} controller(s)");
         }
 
         private Panel CreateControllerUI(DS4Controller controller, int yPosition)
@@ -289,8 +339,10 @@ namespace DS4BatteryMapper
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            _updateTimer?.Stop();
-            _updateTimer?.Dispose();
+            _uiTimer?.Stop();
+            _uiTimer?.Dispose();
+            _pollTimer?.Stop();
+            _pollTimer?.Dispose();
             _controllerManager?.Dispose();
             base.OnFormClosing(e);
         }
