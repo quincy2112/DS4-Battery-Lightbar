@@ -214,14 +214,32 @@ namespace DS4BatteryMapper
                 }
                 catch (Exception) { /* ignore */ }
 
-                // Detect connection type (USB vs Bluetooth) from the input report structure
-                // USB reports start with 0x01, Bluetooth with 0x11
-                bool isBluetooth = (_lastInputReport.Length > 0 && _lastInputReport[0] == 0x11);
-                Trace.WriteLine($"SetLightbar: Detected connection type = {(isBluetooth ? "Bluetooth" : "USB")}");
-
-                if (isBluetooth)
+                // Try USB format first (32-byte report)
+                Trace.WriteLine($"SetLightbar: Trying USB format (32-byte)");
                 {
-                    // Bluetooth: 78-byte report with CRC-32 checksum
+                    var report = new byte[32];
+                    report[0] = 0x05;       // Report ID for USB
+                    report[1] = 0xFF;       // Enable Rumble, Lightbar, and Flash
+                    
+                    report[4] = 0x00;       // Small rumble
+                    report[5] = 0x00;       // Large rumble
+                    report[6] = red;
+                    report[7] = green;
+                    report[8] = blue;
+
+                    bool ok = _device.Write(report);
+                    Trace.WriteLine($"SetLightbar USB (32-byte): Write returned {ok}");
+
+                    if (ok)
+                    {
+                        Trace.WriteLine("SetLightbar: USB format succeeded!");
+                        return;
+                    }
+                }
+
+                // Try Bluetooth format (78-byte with CRC)
+                Trace.WriteLine($"SetLightbar: Trying Bluetooth format (78-byte with CRC)");
+                {
                     var report = new byte[78];
                     report[0] = 0x11;       // Report ID
                     report[1] = 0x80;       // Header (enables output mode)
@@ -244,43 +262,19 @@ namespace DS4BatteryMapper
                     report[76] = (byte)((crc >> 16) & 0xFF);
                     report[77] = (byte)((crc >> 24) & 0xFF);
 
-                    Trace.WriteLine($"SetLightbar BT: Sending 78-byte report with CRC 0x{crc:X8}");
+                    Trace.WriteLine($"SetLightbar BT (78-byte): CRC=0x{crc:X8}");
 
                     bool ok = _device.Write(report);
-                    Trace.WriteLine($"SetLightbar BT: Write returned {ok}");
+                    Trace.WriteLine($"SetLightbar BT (78-byte): Write returned {ok}");
 
                     if (ok)
                     {
-                        Trace.WriteLine("SetLightbar: Bluetooth lightbar update sent successfully!");
-                        return;
-                    }
-                }
-                else
-                {
-                    // USB: 32-byte report, no CRC needed
-                    var report = new byte[32];
-                    report[0] = 0x05;       // Report ID for USB
-                    report[1] = 0xFF;       // Enable Rumble, Lightbar, and Flash
-                    
-                    report[4] = 0x00;       // Small rumble
-                    report[5] = 0x00;       // Large rumble
-                    report[6] = red;
-                    report[7] = green;
-                    report[8] = blue;
-
-                    Trace.WriteLine($"SetLightbar USB: Sending 32-byte report");
-
-                    bool ok = _device.Write(report);
-                    Trace.WriteLine($"SetLightbar USB: Write returned {ok}");
-
-                    if (ok)
-                    {
-                        Trace.WriteLine("SetLightbar: USB lightbar update sent successfully!");
+                        Trace.WriteLine("SetLightbar: Bluetooth format succeeded!");
                         return;
                     }
                 }
 
-                Trace.WriteLine("SetLightbar: Write failed for both USB and Bluetooth formats.");
+                Trace.WriteLine("SetLightbar: Both USB and Bluetooth formats failed!");
                 IsHealthy = false;
             }
             catch (Exception ex)
