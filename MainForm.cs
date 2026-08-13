@@ -15,6 +15,10 @@ namespace DS4BatteryMapper
         private Timer? _pollTimer;             // infrequent device polling (battery, lightbar)
         private volatile bool _isEnumerating = false;
         private volatile bool _isPolling = false;
+        private Color _lowBatteryColor = Color.Red;
+        private Color _highBatteryColor = Color.LimeGreen;
+        private Button? _lowBatteryColorButton;
+        private Button? _highBatteryColorButton;
 
         public MainForm()
         {
@@ -32,12 +36,19 @@ namespace DS4BatteryMapper
         private void InitializeUI()
         {
             this.Text = "DS4 Battery Lightbar Mapper";
-            this.Size = new Size(600, 420);
+            this.Size = new Size(600, 460);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(45, 45, 48);
             this.ForeColor = Color.White;
 
             var mainPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
+
+            var topPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 80,
+                BackColor = Color.FromArgb(45, 45, 48)
+            };
 
             var titleLabel = new Label
             {
@@ -46,7 +57,7 @@ namespace DS4BatteryMapper
                 AutoSize = true,
                 ForeColor = Color.White
             };
-            mainPanel.Controls.Add(titleLabel);
+            topPanel.Controls.Add(titleLabel);
 
             var refreshBtn = new Button
             {
@@ -61,17 +72,41 @@ namespace DS4BatteryMapper
                 // Call poll tick directly to force immediate enumeration + poll
                 PollControllersTick(null, EventArgs.Empty);
             };
-            mainPanel.Controls.Add(refreshBtn);
+            topPanel.Controls.Add(refreshBtn);
+
+            var lowBatteryLabel = new Label
+            {
+                Text = "Low Battery Color (0%)",
+                Location = new Point(10, 45),
+                Size = new Size(160, 20),
+                ForeColor = Color.White
+            };
+            topPanel.Controls.Add(lowBatteryLabel);
+
+            _lowBatteryColorButton = CreateColorButton(_lowBatteryColor, (s, e) => SelectGradientColor(true));
+            _lowBatteryColorButton.Location = new Point(175, 42);
+            topPanel.Controls.Add(_lowBatteryColorButton);
+
+            var highBatteryLabel = new Label
+            {
+                Text = "High Battery Color (100%)",
+                Location = new Point(280, 45),
+                Size = new Size(170, 20),
+                ForeColor = Color.White
+            };
+            topPanel.Controls.Add(highBatteryLabel);
+
+            _highBatteryColorButton = CreateColorButton(_highBatteryColor, (s, e) => SelectGradientColor(false));
+            _highBatteryColorButton.Location = new Point(455, 42);
+            topPanel.Controls.Add(_highBatteryColorButton);
 
             var controllerPanel = new Panel
             {
                 Name = "ControllerPanel",
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                BackColor = Color.FromArgb(45, 45, 48),
-                Location = new Point(0, 50)
+                BackColor = Color.FromArgb(45, 45, 48)
             };
-            mainPanel.Controls.Add(controllerPanel);
 
             var statusLabel = new Label
             {
@@ -83,9 +118,74 @@ namespace DS4BatteryMapper
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.FromArgb(30, 30, 30)
             };
+            mainPanel.Controls.Add(topPanel);
             mainPanel.Controls.Add(statusLabel);
+            mainPanel.Controls.Add(controllerPanel);
 
             this.Controls.Add(mainPanel);
+        }
+
+        private Button CreateColorButton(Color color, EventHandler onClick)
+        {
+            var button = new Button
+            {
+                Size = new Size(40, 24),
+                BackColor = color,
+                FlatStyle = FlatStyle.Popup,
+                UseVisualStyleBackColor = false
+            };
+            button.Click += onClick;
+            return button;
+        }
+
+        private void SelectGradientColor(bool isLowBatteryColor)
+        {
+            using var colorDialog = new ColorDialog
+            {
+                Color = isLowBatteryColor ? _lowBatteryColor : _highBatteryColor,
+                FullOpen = true
+            };
+
+            if (colorDialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            if (isLowBatteryColor)
+            {
+                _lowBatteryColor = colorDialog.Color;
+                if (_lowBatteryColorButton != null)
+                {
+                    _lowBatteryColorButton.BackColor = _lowBatteryColor;
+                }
+            }
+            else
+            {
+                _highBatteryColor = colorDialog.Color;
+                if (_highBatteryColorButton != null)
+                {
+                    _highBatteryColorButton.BackColor = _highBatteryColor;
+                }
+            }
+
+            RefreshControllerPanel();
+        }
+
+        private void RefreshControllerPanel()
+        {
+            if (_controllerManager == null)
+            {
+                return;
+            }
+
+            try
+            {
+                UpdateControllerPanel(_controllerManager.GetConnectedControllers());
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("[MainForm] RefreshControllerPanel failed: " + ex);
+            }
         }
 
         private void StartMonitoring()
@@ -182,7 +282,7 @@ namespace DS4BatteryMapper
                     // Set lightbar with a 1s timeout
                     try
                     {
-                        var battery = Math.Max(0, Math.Min(100, controller?.BatteryPercentage ?? 0));
+                        var battery = Math.Max(0, Math.Min(100, controller.BatteryPercentage));
                         var color = BatteryToColor(battery);
 
                         Trace.WriteLine($"[MainForm] SetLightbar called for {controller.DeviceName} with battery {battery}%");
@@ -269,7 +369,7 @@ namespace DS4BatteryMapper
 
         private Panel CreateControllerUI(DS4Controller controller, int yPosition)
         {
-            var battery = Math.Max(0, Math.Min(100, controller?.BatteryPercentage ?? 0));
+            var battery = Math.Max(0, Math.Min(100, controller.BatteryPercentage));
             var color = BatteryToColor(battery);
 
             var panel = new Panel
@@ -283,7 +383,7 @@ namespace DS4BatteryMapper
             // Controller name
             var nameLabel = new Label
             {
-                Text = $"Controller: {controller?.DeviceName ?? "Unknown"}",
+                Text = $"Controller: {controller.DeviceName}",
                 Location = new Point(10, 10),
                 Size = new Size(400, 25),
                 Font = new Font("Segoe UI", 11, FontStyle.Bold),
@@ -346,25 +446,14 @@ namespace DS4BatteryMapper
 
         private Color BatteryToColor(int percentage)
         {
-            // Red (0-33%), Yellow (33-66%), Green (66-100%)
-            if (percentage <= 33)
-            {
-                // Red to Yellow
-                int g = (int)(255 * (percentage / 33.0));
-                return Color.FromArgb(255, g, 0);
-            }
-            else if (percentage <= 66)
-            {
-                // Yellow to Green
-                int r = (int)(255 * ((66 - percentage) / 33.0));
-                return Color.FromArgb(r, 255, 0);
-            }
-            else
-            {
-                // Green
-                int r = (int)(255 * ((100 - percentage) / 34.0));
-                return Color.FromArgb(r, 255, 0);
-            }
+            percentage = Math.Max(0, Math.Min(100, percentage));
+            double ratio = percentage / 100.0;
+
+            int r = (int)Math.Round(_lowBatteryColor.R + ((_highBatteryColor.R - _lowBatteryColor.R) * ratio));
+            int g = (int)Math.Round(_lowBatteryColor.G + ((_highBatteryColor.G - _lowBatteryColor.G) * ratio));
+            int b = (int)Math.Round(_lowBatteryColor.B + ((_highBatteryColor.B - _lowBatteryColor.B) * ratio));
+
+            return Color.FromArgb(r, g, b);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
