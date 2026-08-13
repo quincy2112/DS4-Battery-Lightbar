@@ -67,30 +67,16 @@ namespace DS4BatteryMapper
                     _consecutiveReadFailures = 0;
                     IsHealthy = true;
 
-                    int dataStart = -1;
-
-                    if (reportId == 0x01)
+                    // Battery is at offset 30 for both USB and Bluetooth
+                    // (for BT it's after the 2-byte header, so absolute offset is still 30 in the normalized input report)
+                    if (_lastInputReport.Length > 30)
                     {
-                        // USB report
-                        dataStart = 1;
-                    }
-                    else if (reportId == 0x11)
-                    {
-                        // Bluetooth report
-                        dataStart = 3;
-                    }
-
-                    // Extract battery
-                    if (dataStart >= 0 && _lastInputReport.Length > dataStart + 29)
-                    {
-                        byte batByte = _lastInputReport[dataStart + 29];
+                        byte batByte = _lastInputReport[30];
                         bool charging = (batByte & 0x10) != 0;
                         byte rawLevel = (byte)(batByte & 0x0F);
 
-                        // Convert raw level to percentage
-                        int percentage = charging
-                            ? (int)((rawLevel * 100) / 11)
-                            : (int)((rawLevel * 100) / 8);
+                        // Convert raw level to percentage: 0-15 maps to 0%-100% in 10% increments
+                        int percentage = rawLevel * 10; // 0, 10, 20, 30... 100
                         percentage = Math.Min(100, Math.Max(0, percentage));
 
                         BatteryPercentage = percentage;
@@ -99,9 +85,9 @@ namespace DS4BatteryMapper
                     }
                     else
                     {
-                        // Fallback: report format not recognized
+                        // Report too short to contain battery
                         _consecutiveReadFailures++;
-                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read failed: unknown report format (report_id=0x{reportId:X2}, length={_lastInputReport.Length})");
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} report too short for battery (length={_lastInputReport.Length})");
                         
                         if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                         {
