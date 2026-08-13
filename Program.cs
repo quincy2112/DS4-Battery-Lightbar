@@ -9,16 +9,16 @@ namespace DS4BatteryMapper
         [STAThread]
         static void Main()
         {
-            // Ensure Debug.WriteLine goes to the console when running from PowerShell/Command Prompt
+            // Attach a console trace listener so logs appear when running from PowerShell/Command Prompt
             try
             {
-                Debug.Listeners.Add(new TextWriterTraceListener(Console.Out));
-                Debug.AutoFlush = true;
-                Console.WriteLine("Debug listener attached: Debug.WriteLine will also appear in console output.");
+                Trace.Listeners.Add(new TextWriterTraceListener(Console.Out));
+                Trace.AutoFlush = true;
+                Console.WriteLine("Console trace listener attached: Trace.WriteLine will appear in the console.");
             }
             catch (Exception)
             {
-                // If attaching a console listener isn't possible, ignore and continue - Debug output will still go to attached debuggers
+                // Ignore if attaching a listener fails
             }
 
             Application.EnableVisualStyles();
