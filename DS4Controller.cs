@@ -11,13 +11,16 @@ namespace DS4BatteryMapper
         private byte[] _lastInputReport;
 
         public string DeviceName => _device?.Description ?? "Unknown";
+        // -1 means unknown / not yet read
         public int BatteryPercentage { get; private set; }
+        public DateTime? LastSeen { get; private set; }
 
         public DS4Controller(HidDevice device)
         {
             _device = device;
             _lastInputReport = new byte[64];
-            BatteryPercentage = 0; // default until first successful read
+            BatteryPercentage = -1; // default until first successful read
+            LastSeen = null;
             // IMPORTANT: Do NOT perform blocking I/O (UpdateBatteryStatus) in the constructor.
             // Reads/writes are performed during the scheduled poll with timeouts.
         }
@@ -42,6 +45,8 @@ namespace DS4BatteryMapper
                     {
                         BatteryPercentage = (int)(_lastInputReport[12] / 2.55);
                         BatteryPercentage = Math.Min(100, Math.Max(0, BatteryPercentage));
+                        LastSeen = DateTime.Now;
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read: {BatteryPercentage}%");
                     }
                 }
             }
@@ -130,7 +135,6 @@ namespace DS4BatteryMapper
                                 // If Write didn't work or isn't appropriate for this transport, try feature/write-feature methods if available
                                 try
                                 {
-                                    // HidLibrary historically exposes WriteFeatureData or WriteFeature. Use reflection to call if present.
                                     var mi = _device.GetType().GetMethod("WriteFeatureData") ?? _device.GetType().GetMethod("WriteFeature");
                                     if (mi != null)
                                     {
