@@ -75,18 +75,43 @@ namespace DS4BatteryMapper
                     _consecutiveReadFailures = 0;
                     IsHealthy = true;
 
-                    // Determine battery offset based on report type
-                    // USB (0x01): payload starts at byte 1, battery at byte 1 + 29 = 30
-                    // Bluetooth (0x11): payload starts at byte 3, battery at byte 3 + 29 = 32
+                    // Try to read battery from the expected offset based on report type
+                    byte batByte = 0x00;
                     int batteryOffset = -1;
-                    if (reportId == 0x01)
-                        batteryOffset = 30;  // USB
-                    else if (reportId == 0x11)
-                        batteryOffset = 32;  // Bluetooth
 
-                    if (batteryOffset >= 0 && _lastInputReport.Length > batteryOffset)
+                    if (reportId == 0x01)
                     {
-                        byte batByte = _lastInputReport[batteryOffset];
+                        // USB format: battery should be at byte 30
+                        if (_lastInputReport.Length > 30)
+                        {
+                            batByte = _lastInputReport[30];
+                            batteryOffset = 30;
+                            
+                            // Fallback: if byte 30 is 0x00 (no data), try byte 32 (Bluetooth offset)
+                            if (batByte == 0x00 && _lastInputReport.Length > 32)
+                            {
+                                byte potentialBat = _lastInputReport[32];
+                                if (potentialBat != 0x00)
+                                {
+                                    batByte = potentialBat;
+                                    batteryOffset = 32;
+                                    Trace.WriteLine($"[DS4Controller] {DeviceName} byte[30] was empty, using fallback byte[32]");
+                                }
+                            }
+                        }
+                    }
+                    else if (reportId == 0x11)
+                    {
+                        // Bluetooth format: battery should be at byte 32
+                        if (_lastInputReport.Length > 32)
+                        {
+                            batByte = _lastInputReport[32];
+                            batteryOffset = 32;
+                        }
+                    }
+
+                    if (batteryOffset >= 0 && batByte != 0x00)
+                    {
                         bool charging = (batByte & 0x10) != 0;
                         byte rawLevel = (byte)(batByte & 0x0F);
 
@@ -108,9 +133,9 @@ namespace DS4BatteryMapper
                     }
                     else
                     {
-                        // Report too short or unknown report type
+                        // Report too short or unknown report type or invalid battery byte
                         _consecutiveReadFailures++;
-                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read failed: unknown report type 0x{reportId:X2} or report too short (length={_lastInputReport.Length})");
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read failed: report_id=0x{reportId:X2}, battery_offset={batteryOffset}, byte_value=0x{batByte:X2}, report_len={_lastInputReport.Length}");
                         
                         if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                         {
