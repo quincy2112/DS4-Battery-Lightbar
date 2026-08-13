@@ -180,13 +180,23 @@ namespace DS4BatteryMapper
 
         private void ShowWindow()
         {
+            // Restore window size and position
+            this.Size = new Size(650, 900);
+            this.StartPosition = FormStartPosition.CenterScreen;
             this.WindowState = FormWindowState.Normal;
             this.Show();
             this.Activate();
+            this.Focus();
         }
 
         private void ExitApplication()
         {
+            // Properly dispose before exiting
+            _uiTimer?.Stop();
+            _uiTimer?.Dispose();
+            _pollTimer?.Stop();
+            _pollTimer?.Dispose();
+            _controllerManager?.Dispose();
             _trayIcon?.Dispose();
             _trayMenu?.Dispose();
             Application.Exit();
