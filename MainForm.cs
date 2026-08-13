@@ -11,14 +11,16 @@ namespace DS4BatteryMapper
     public partial class MainForm : Form
     {
         private DS4ControllerManager? _controllerManager;
-        private Timer? _uiTimer;               // frequent UI refresh (no blocking I/O)
-        private Timer? _pollTimer;             // infrequent device polling (battery, lightbar)
+        private Timer? _uiTimer;
+        private Timer? _pollTimer;
         private volatile bool _isEnumerating = false;
         private volatile bool _isPolling = false;
         private Color _lowBatteryColor = Color.Red;
-        private Color _highBatteryColor = Color.Blue;  // Changed from LimeGreen to Blue
+        private Color _highBatteryColor = Color.Blue;
         private Button? _lowBatteryColorButton;
         private Button? _highBatteryColorButton;
+        private Label? _statusLabel;
+        private FlowLayoutPanel? _controllerPanel;
 
         public MainForm()
         {
@@ -30,54 +32,63 @@ namespace DS4BatteryMapper
 
         private void InitializeComponent()
         {
-            // WinForms designer placeholder - all UI initialized in InitializeUI
+            // Designer placeholder
         }
 
         private void InitializeUI()
         {
             this.Text = "DS4 Battery Lightbar Mapper";
-            this.Size = new Size(600, 800);
+            this.Size = new Size(650, 900);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(45, 45, 48);
             this.ForeColor = Color.White;
 
-            var mainPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
-
-            var topPanel = new Panel
+            // Root table: 4 rows (header, controllers, color pickers, status)
+            var mainTable = new TableLayoutPanel
             {
-                Dock = DockStyle.Top,
-                Height = 50,  // Minimal height for just title and refresh button
+                Dock = DockStyle.Fill,
+                RowCount = 4,
+                ColumnCount = 1,
+                Padding = new Padding(10),
                 BackColor = Color.FromArgb(45, 45, 48)
+            };
+
+            // Row 0: Header (title + refresh button)
+            var headerPanel = new Panel
+            {
+                BackColor = Color.FromArgb(45, 45, 48),
+                Height = 40,
+                Dock = DockStyle.Top
             };
 
             var titleLabel = new Label
             {
                 Text = "Connected DS4 Controllers",
-                Location = new Point(10, 5),
+                Location = new Point(0, 5),
                 Font = new Font("Segoe UI", 12, FontStyle.Bold),
                 AutoSize = true,
                 ForeColor = Color.White
             };
-            topPanel.Controls.Add(titleLabel);
+            headerPanel.Controls.Add(titleLabel);
 
             var refreshBtn = new Button
             {
                 Text = "Refresh",
-                Location = new Point(480, 5),
-                Size = new Size(80, 28),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Location = new Point(560, 5),
+                Size = new Size(80, 28)
             };
             refreshBtn.Click += (s, e) =>
             {
-                Trace.WriteLine("[MainForm] Refresh clicked - forcing poll");
+                Trace.WriteLine("[MainForm] Refresh clicked");
                 PollControllersTick(null, EventArgs.Empty);
             };
-            topPanel.Controls.Add(refreshBtn);
+            headerPanel.Controls.Add(refreshBtn);
+            mainTable.Controls.Add(headerPanel, 0, 0);
+            mainTable.SetRowStyle(0, new RowStyle(SizeType.Absolute, 40));
 
-            // Use FlowLayoutPanel for automatic layout of multiple controllers
-            var controllerPanel = new FlowLayoutPanel
+            // Row 1: Controllers (fill remaining space)
+            _controllerPanel = new FlowLayoutPanel
             {
-                Name = "ControllerPanel",
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 FlowDirection = FlowDirection.TopDown,
@@ -85,59 +96,65 @@ namespace DS4BatteryMapper
                 BackColor = Color.FromArgb(45, 45, 48),
                 Padding = new Padding(5)
             };
+            mainTable.Controls.Add(_controllerPanel, 0, 1);
+            mainTable.SetRowStyle(1, new RowStyle(SizeType.Percent, 100));
 
-            var statusLabel = new Label
+            // Row 2: Color pickers
+            var colorPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 60,
+                BackColor = Color.FromArgb(45, 45, 48),
+                Padding = new Padding(0, 5, 0, 5)
+            };
+
+            var lowLabel = new Label
+            {
+                Text = "Low Battery:",
+                Location = new Point(10, 10),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9),
+                ForeColor = Color.White
+            };
+            colorPanel.Controls.Add(lowLabel);
+
+            _lowBatteryColorButton = CreateColorButton(_lowBatteryColor, (s, e) => SelectGradientColor(true));
+            _lowBatteryColorButton.Location = new Point(100, 8);
+            colorPanel.Controls.Add(_lowBatteryColorButton);
+
+            var highLabel = new Label
+            {
+                Text = "High Battery:",
+                Location = new Point(160, 10),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9),
+                ForeColor = Color.White
+            };
+            colorPanel.Controls.Add(highLabel);
+
+            _highBatteryColorButton = CreateColorButton(_highBatteryColor, (s, e) => SelectGradientColor(false));
+            _highBatteryColorButton.Location = new Point(250, 8);
+            colorPanel.Controls.Add(_highBatteryColorButton);
+
+            mainTable.Controls.Add(colorPanel, 0, 2);
+            mainTable.SetRowStyle(2, new RowStyle(SizeType.Absolute, 60));
+
+            // Row 3: Status
+            _statusLabel = new Label
             {
                 Name = "StatusLabel",
                 Text = "Initializing...",
-                Dock = DockStyle.Bottom,
-                Height = 60,
+                Dock = DockStyle.Top,
+                Height = 30,
                 ForeColor = Color.LimeGreen,
-                TextAlign = ContentAlignment.TopCenter,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 9),
                 BackColor = Color.FromArgb(30, 30, 30)
             };
+            mainTable.Controls.Add(_statusLabel, 0, 3);
+            mainTable.SetRowStyle(3, new RowStyle(SizeType.Absolute, 30));
 
-            // Add color picker controls to the status/bottom panel
-            var bottomPanel = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 60,
-                BackColor = Color.FromArgb(30, 30, 30)
-            };
-
-            var lowBatteryLabel = new Label
-            {
-                Text = "Low Battery:",
-                Location = new Point(10, 8),
-                Size = new Size(80, 15),
-                Font = new Font("Segoe UI", 9),
-                ForeColor = Color.White
-            };
-            bottomPanel.Controls.Add(lowBatteryLabel);
-
-            _lowBatteryColorButton = CreateColorButton(_lowBatteryColor, (s, e) => SelectGradientColor(true));
-            _lowBatteryColorButton.Location = new Point(95, 5);
-            bottomPanel.Controls.Add(_lowBatteryColorButton);
-
-            var highBatteryLabel = new Label
-            {
-                Text = "High Battery:",
-                Location = new Point(160, 8),
-                Size = new Size(80, 15),
-                Font = new Font("Segoe UI", 9),
-                ForeColor = Color.White
-            };
-            bottomPanel.Controls.Add(highBatteryLabel);
-
-            _highBatteryColorButton = CreateColorButton(_highBatteryColor, (s, e) => SelectGradientColor(false));
-            _highBatteryColorButton.Location = new Point(245, 5);
-            bottomPanel.Controls.Add(_highBatteryColorButton);
-
-            mainPanel.Controls.Add(topPanel);
-            mainPanel.Controls.Add(bottomPanel);
-            mainPanel.Controls.Add(controllerPanel);
-
-            this.Controls.Add(mainPanel);
+            this.Controls.Add(mainTable);
         }
 
         private Button CreateColorButton(Color color, EventHandler onClick)
@@ -162,25 +179,19 @@ namespace DS4BatteryMapper
             };
 
             if (colorDialog.ShowDialog(this) != DialogResult.OK)
-            {
                 return;
-            }
 
             if (isLowBatteryColor)
             {
                 _lowBatteryColor = colorDialog.Color;
                 if (_lowBatteryColorButton != null)
-                {
                     _lowBatteryColorButton.BackColor = _lowBatteryColor;
-                }
             }
             else
             {
                 _highBatteryColor = colorDialog.Color;
                 if (_highBatteryColorButton != null)
-                {
                     _highBatteryColorButton.BackColor = _highBatteryColor;
-                }
             }
 
             RefreshControllerPanel();
@@ -188,10 +199,7 @@ namespace DS4BatteryMapper
 
         private void RefreshControllerPanel()
         {
-            if (_controllerManager == null)
-            {
-                return;
-            }
+            if (_controllerManager == null) return;
 
             try
             {
@@ -205,12 +213,10 @@ namespace DS4BatteryMapper
 
         private void StartMonitoring()
         {
-            // UI timer: less frequent to avoid racing enumeration (2s)
             _uiTimer = new Timer { Interval = 2000 };
             _uiTimer.Tick += UIUpdateTick!;
             _uiTimer.Start();
 
-            // Poll timer: infrequent (15s) device polling for battery and lightbar writes
             _pollTimer = new Timer { Interval = 15000 };
             _pollTimer.Tick += PollControllersTick!;
             _pollTimer.Start();
@@ -218,34 +224,17 @@ namespace DS4BatteryMapper
             Trace.WriteLine("Monitoring started: UI=2000ms, Poll=15000ms");
         }
 
-        // UI-only update (fast). Enumerates controllers but does not perform blocking reads/writes.
         private async void UIUpdateTick(object? sender, EventArgs e)
         {
             if (_controllerManager == null) return;
-            if (_isEnumerating)
-            {
-                Trace.WriteLine("[MainForm] UIUpdateTick skipped - enumeration already running");
-                return;
-            }
+            if (_isEnumerating) return;
 
             _isEnumerating = true;
             try
             {
-                Trace.WriteLine("[MainForm] UIUpdateTick - enumerating controllers");
-                // Run enumeration on background thread briefly
                 var controllers = await Task.Run(() => _controllerManager.GetConnectedControllers());
-
-                Trace.WriteLine($"[MainForm] UIUpdateTick enumerated {controllers.Count} controller(s)");
-
-                // Update status label immediately so the user can see count/time even if detailed UI fails
-                var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
-                if (statusLabel != null)
-                {
-                    statusLabel.Text = $"Last enum: {DateTime.Now:HH:mm:ss} — {controllers.Count} controller(s)";
-                }
-
-                Trace.WriteLine($"[MainForm] Calling UpdateControllerPanel with {controllers.Count} controller(s)");
-                // Update UI with current cached battery values (no blocking calls here)
+                if (_statusLabel != null)
+                    _statusLabel.Text = $"Last enum: {DateTime.Now:HH:mm:ss} — {controllers.Count} controller(s)";
                 UpdateControllerPanel(controllers);
             }
             catch (Exception ex)
@@ -258,64 +247,40 @@ namespace DS4BatteryMapper
             }
         }
 
-        // Poll controllers less frequently: perform battery reads and SetLightbar with timeouts
         private async void PollControllersTick(object? sender, EventArgs e)
         {
             if (_controllerManager == null) return;
-            if (_isPolling)
-            {
-                Trace.WriteLine("[MainForm] PollControllersTick skipped - polling already running");
-                return;
-            }
+            if (_isPolling) return;
 
             _isPolling = true;
-
             try
             {
-                Trace.WriteLine("[MainForm] PollControllersTick start");
                 var controllers = await Task.Run(() => _controllerManager.GetConnectedControllers());
-
-                Trace.WriteLine($"[MainForm] PollControllersTick found {controllers.Count} controller(s)");
 
                 foreach (var controller in controllers)
                 {
-                    // Update battery with a 1s timeout
                     try
                     {
                         var batteryTask = Task.Run(() => controller.UpdateBatteryStatus());
-                        var finished = await Task.WhenAny(batteryTask, Task.Delay(1000));
-                        if (finished != batteryTask)
-                        {
-                            Trace.WriteLine($"[MainForm] UpdateBatteryStatus timed out for {controller.DeviceName}");
-                        }
+                        await Task.WhenAny(batteryTask, Task.Delay(1000));
                     }
                     catch (Exception ex)
                     {
-                        Trace.WriteLine("[MainForm] Error updating battery during poll: " + ex);
+                        Trace.WriteLine("[MainForm] Error updating battery: " + ex);
                     }
 
-                    // Set lightbar with a 1s timeout
                     try
                     {
                         var battery = Math.Max(0, Math.Min(100, controller.BatteryPercentage));
                         var color = BatteryToColor(battery);
-
-                        Trace.WriteLine($"[MainForm] SetLightbar called for {controller.DeviceName} with battery {battery}%");
-
                         var lightTask = Task.Run(() => controller.SetLightbar((byte)color.R, (byte)color.G, (byte)color.B));
-                        var finished2 = await Task.WhenAny(lightTask, Task.Delay(1000));
-                        if (finished2 != lightTask)
-                        {
-                            Trace.WriteLine($"[MainForm] SetLightbar timed out for {controller.DeviceName}");
-                        }
+                        await Task.WhenAny(lightTask, Task.Delay(1000));
                     }
                     catch (Exception ex)
                     {
-                        Trace.WriteLine("[MainForm] Error setting lightbar during poll: " + ex);
+                        Trace.WriteLine("[MainForm] Error setting lightbar: " + ex);
                     }
                 }
-
-                Trace.WriteLine("[MainForm] PollControllersTick finished");
             }
             catch (Exception ex)
             {
@@ -329,19 +294,9 @@ namespace DS4BatteryMapper
 
         private void UpdateControllerPanel(List<DS4Controller> controllers)
         {
-            Trace.WriteLine($"[MainForm] Entering UpdateControllerPanel with {controllers?.Count ?? 0} controller(s)");
+            if (_controllerPanel == null) return;
 
-            var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as FlowLayoutPanel;
-            var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
-
-            if (controllerPanel == null)
-            {
-                Trace.WriteLine("[MainForm] ControllerPanel not found");
-                if (statusLabel != null) statusLabel.Text = "UI error: Controller panel not found";
-                return;
-            }
-
-            controllerPanel.Controls.Clear();
+            _controllerPanel.Controls.Clear();
 
             if (controllers == null || controllers.Count == 0)
             {
@@ -352,12 +307,9 @@ namespace DS4BatteryMapper
                     ForeColor = Color.Gray,
                     Font = new Font("Segoe UI", 10)
                 };
-                controllerPanel.Controls.Add(noLabel);
-
-                if (statusLabel != null)
-                    statusLabel.Text = "No DS4 controllers detected";
-
-                Trace.WriteLine("[MainForm] No controllers found (UI)");
+                _controllerPanel.Controls.Add(noLabel);
+                if (_statusLabel != null)
+                    _statusLabel.Text = "No DS4 controllers detected";
                 return;
             }
 
@@ -365,19 +317,16 @@ namespace DS4BatteryMapper
             {
                 try
                 {
-                    var controllerUI = CreateControllerUI(controller);
-                    controllerPanel.Controls.Add(controllerUI);
+                    _controllerPanel.Controls.Add(CreateControllerUI(controller));
                 }
-                catch (Exception uiEx)
+                catch (Exception ex)
                 {
-                    Trace.WriteLine("[MainForm] Error creating controller UI: " + uiEx);
+                    Trace.WriteLine("[MainForm] Error creating controller UI: " + ex);
                 }
             }
 
-            if (statusLabel != null)
-                statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
-
-            Trace.WriteLine($"[MainForm] Displaying {controllers.Count} controller(s)");
+            if (_statusLabel != null)
+                _statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
         }
 
         private Panel CreateControllerUI(DS4Controller controller)
@@ -387,7 +336,7 @@ namespace DS4BatteryMapper
 
             var panel = new Panel
             {
-                Width = 550,
+                Width = 600,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BorderStyle = BorderStyle.FixedSingle,
@@ -395,7 +344,6 @@ namespace DS4BatteryMapper
                 Margin = new Padding(0, 5, 0, 5)
             };
 
-            // Controller name
             var nameLabel = new Label
             {
                 Text = $"Controller: {controller.DeviceName}",
@@ -406,7 +354,6 @@ namespace DS4BatteryMapper
             };
             panel.Controls.Add(nameLabel);
 
-            // Battery percentage
             var batteryLabel = new Label
             {
                 Text = $"Battery: {battery}%",
@@ -417,7 +364,6 @@ namespace DS4BatteryMapper
             };
             panel.Controls.Add(batteryLabel);
 
-            // Battery bar
             var barBg = new Panel
             {
                 Location = new Point(10, 65),
@@ -435,7 +381,6 @@ namespace DS4BatteryMapper
             barBg.Controls.Add(barFill);
             panel.Controls.Add(barBg);
 
-            // Lightbar preview
             var lightbarPreview = new Panel
             {
                 Location = new Point(350, 40),
