@@ -53,12 +53,18 @@ namespace DS4BatteryMapper
                 BackColor = Color.FromArgb(45, 45, 48)
             };
 
+            // Configure row styles
+            mainTable.RowStyles.Clear();
+            mainTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));   // Header
+            mainTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // Controllers (fill)
+            mainTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));   // Color pickers
+            mainTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));   // Status
+
             // Row 0: Header (title + refresh button)
             var headerPanel = new Panel
             {
                 BackColor = Color.FromArgb(45, 45, 48),
-                Height = 40,
-                Dock = DockStyle.Top
+                Dock = DockStyle.Fill
             };
 
             var titleLabel = new Label
@@ -84,7 +90,6 @@ namespace DS4BatteryMapper
             };
             headerPanel.Controls.Add(refreshBtn);
             mainTable.Controls.Add(headerPanel, 0, 0);
-            mainTable.SetRowStyle(0, new RowStyle(SizeType.Absolute, 40));
 
             // Row 1: Controllers (fill remaining space)
             _controllerPanel = new FlowLayoutPanel
@@ -97,13 +102,11 @@ namespace DS4BatteryMapper
                 Padding = new Padding(5)
             };
             mainTable.Controls.Add(_controllerPanel, 0, 1);
-            mainTable.SetRowStyle(1, new RowStyle(SizeType.Percent, 100));
 
             // Row 2: Color pickers
             var colorPanel = new Panel
             {
-                Dock = DockStyle.Top,
-                Height = 60,
+                Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(45, 45, 48),
                 Padding = new Padding(0, 5, 0, 5)
             };
@@ -137,22 +140,19 @@ namespace DS4BatteryMapper
             colorPanel.Controls.Add(_highBatteryColorButton);
 
             mainTable.Controls.Add(colorPanel, 0, 2);
-            mainTable.SetRowStyle(2, new RowStyle(SizeType.Absolute, 60));
 
             // Row 3: Status
             _statusLabel = new Label
             {
                 Name = "StatusLabel",
                 Text = "Initializing...",
-                Dock = DockStyle.Top,
-                Height = 30,
+                Dock = DockStyle.Fill,
                 ForeColor = Color.LimeGreen,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 9),
                 BackColor = Color.FromArgb(30, 30, 30)
             };
             mainTable.Controls.Add(_statusLabel, 0, 3);
-            mainTable.SetRowStyle(3, new RowStyle(SizeType.Absolute, 30));
 
             this.Controls.Add(mainTable);
         }
