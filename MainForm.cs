@@ -118,9 +118,9 @@ namespace DS4BatteryMapper
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.FromArgb(30, 30, 30)
             };
-            mainPanel.Controls.Add(controllerPanel);
             mainPanel.Controls.Add(topPanel);
             mainPanel.Controls.Add(statusLabel);
+            mainPanel.Controls.Add(controllerPanel);
 
             this.Controls.Add(mainPanel);
         }
