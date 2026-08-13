@@ -47,30 +47,41 @@ namespace DS4BatteryMapper
                         // Recognize DS4 by VID/PID for Sony (0x054C: PlayStation) and DS4 wireless PID 0x09CC
                         if (vid == 0x054C && (pid == 0x09CC || pid == 0x09C0 || pid == 0x05C4))
                         {
-                            // Verify the device can actually be opened before considering it valid
-                            bool canOpen = false;
+                            // Test read to verify device is actually functional
+                            bool isHealthy = false;
                             try
                             {
-                                if (d.IsOpen)
+                                if (!d.IsOpen)
+                                    d.OpenDevice();
+
+                                var testRead = d.Read();
+                                if (testRead.Status == HidDeviceData.ReadStatus.Success && testRead.Data.Length > 0)
                                 {
-                                    canOpen = true;
+                                    byte reportId = testRead.Data[0];
+                                    // Accept only valid report IDs (0x01 for USB, 0x11 for Bluetooth)
+                                    if (reportId == 0x01 || reportId == 0x11)
+                                    {
+                                        isHealthy = true;
+                                        log.Add($"[DS4Manager] Test read succeeded with valid report_id=0x{reportId:X2}");
+                                    }
+                                    else
+                                    {
+                                        log.Add($"[DS4Manager] Test read got invalid report_id=0x{reportId:X2}, skipping device");
+                                    }
                                 }
                                 else
                                 {
-                                    d.OpenDevice();
-                                    canOpen = true;
-                                    d.CloseDevice();
+                                    log.Add($"[DS4Manager] Test read failed with status={testRead.Status}, skipping device");
                                 }
                             }
-                            catch (Exception openEx)
+                            catch (Exception testEx)
                             {
-                                log.Add($"[DS4Manager] Failed to open device {path}: {openEx.Message}");
-                                canOpen = false;
+                                log.Add($"[DS4Manager] Test read exception: {testEx.Message}, skipping device");
                             }
 
-                            if (!canOpen)
+                            if (!isHealthy)
                             {
-                                log.Add($"[DS4Manager] Skipping unreachable DS4: {path}");
+                                log.Add($"[DS4Manager] Skipping unhealthy DS4: {path}");
                                 continue;
                             }
 
@@ -93,9 +104,8 @@ namespace DS4BatteryMapper
                             }
                             else
                             {
-                                // Reset health status when reusing a controller (give it a fresh chance)
-                                _controllers[key].ResetHealth();
-                                log.Add($"[DS4Manager] Reusing existing controller for {path} (health reset)");
+                                // Reuse existing controller (don't reset health; it's working)
+                                log.Add($"[DS4Manager] Reusing existing controller for {path}");
                             }
 
                             log.Add($"[DS4Manager] Recognized DS4: {path}");
@@ -116,14 +126,14 @@ namespace DS4BatteryMapper
                     _controllers.Remove(key);
                 }
 
-                // Build the result list from the dictionary values, filtering out unhealthy controllers
+                // Build the result list from the dictionary values
                 var result = new List<DS4Controller>();
                 lock (_lock)
                 {
-                    result = _controllers.Values.Where(c => c.IsHealthy).ToList();
+                    result = _controllers.Values.ToList();
                 }
 
-                log.Add($"[DS4Manager] Returning {result.Count} healthy controller(s) (total cached: {_controllers.Count})");
+                log.Add($"[DS4Manager] Returning {result.Count} controller(s) (total cached: {_controllers.Count})");
 
                 // Persist device enumeration for debugging
                 try
@@ -141,7 +151,7 @@ namespace DS4BatteryMapper
             catch (Exception ex)
             {
                 Trace.WriteLine($"[DS4Manager] Enumeration failed: {ex}");
-                return _controllers.Values.Where(c => c.IsHealthy).ToList();
+                return _controllers.Values.ToList();
             }
         }
 
