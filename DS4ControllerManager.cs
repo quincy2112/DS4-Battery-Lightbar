@@ -99,6 +99,7 @@ namespace DS4BatteryMapper
 
                             // extract a dedupe key (prefer Bluetooth address-like substring if present)
                             var key = ExtractDeviceKey(path) ?? path;
+                            log.Add($"[DS4Manager] Extracted key: {key}");
                             foundKeys.Add(key);
 
                             if (!_controllers.ContainsKey(key))
@@ -167,36 +168,23 @@ namespace DS4BatteryMapper
             }
         }
 
-        // Try to extract an 8-hex Bluetooth address or a stable identifier from the device path.
-        // Examples of device paths include segments like "...pid&09cc#9&22f644e1&0&0000#..." where 22f644e1 is useful to dedupe.
+        // Extract device key from the Bluetooth device path.
+        // Bluetooth paths look like: ...#9&22f644e1&0&0000#... or ...#9&19db4fb2&a&0000#...
+        // We want to extract the unique hardware identifier (the 8-hex part after #9&)
         private string? ExtractDeviceKey(string devicePath)
         {
             if (string.IsNullOrEmpty(devicePath)) return null;
 
-            // Look for an 8-hex group surrounded by ampersands
-            var m = Regex.Match(devicePath, "&([0-9A-Fa-f]{8})&");
+            // For Bluetooth devices, the pattern is: #9&<unique_id>&<something>&0000#
+            // Extract the first 8-hex after #9&
+            var m = Regex.Match(devicePath, @"#9&([0-9A-Fa-f]{8})&");
             if (m.Success && m.Groups.Count > 1)
             {
                 return m.Groups[1].Value.ToLowerInvariant();
             }
 
-            // Fallback: look for "pid&xxxx#<instance>#" and return the instance between pid# and next #
-            var pidIndex = devicePath.IndexOf("pid&", StringComparison.OrdinalIgnoreCase);
-            if (pidIndex >= 0)
-            {
-                var hashIndex = devicePath.IndexOf('#', pidIndex);
-                if (hashIndex >= 0)
-                {
-                    var nextHash = devicePath.IndexOf('#', hashIndex + 1);
-                    if (nextHash > hashIndex)
-                    {
-                        var instance = devicePath.Substring(hashIndex + 1, nextHash - hashIndex - 1);
-                        return instance.ToLowerInvariant();
-                    }
-                }
-            }
-
-            return null;
+            // Fallback: use the full path as unique key if regex doesn't match
+            return devicePath.ToLowerInvariant();
         }
 
         public void Dispose()
