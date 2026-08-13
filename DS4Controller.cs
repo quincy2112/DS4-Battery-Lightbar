@@ -38,14 +38,45 @@ namespace DS4BatteryMapper
                 if (data.Status == HidDeviceData.ReadStatus.Success && data.Data.Length > 0)
                 {
                     _lastInputReport = data.Data;
-                    // Battery level is in byte 12 (0-indexed)
-                    // Range is 0-255, map to 0-100
-                    if (_lastInputReport.Length > 12)
+
+                    // Determine report type and extract battery from the correct offset
+                    // USB: report id 0x01, battery at data_start=1, offset +11 -> byte 12 total
+                    // Bluetooth: report id 0x11, battery at data_start=3, offset +29 -> byte 32 total
+                    byte reportId = _lastInputReport[0];
+                    int dataStart = -1;
+
+                    if (reportId == 0x01)
                     {
-                        BatteryPercentage = (int)(_lastInputReport[12] / 2.55);
-                        BatteryPercentage = Math.Min(100, Math.Max(0, BatteryPercentage));
+                        // USB report
+                        dataStart = 1;
+                    }
+                    else if (reportId == 0x11)
+                    {
+                        // Bluetooth report
+                        dataStart = 3;
+                    }
+
+                    // Extract battery
+                    if (dataStart >= 0 && _lastInputReport.Length > dataStart + 29)
+                    {
+                        byte batByte = _lastInputReport[dataStart + 29];
+                        bool charging = (batByte & 0x10) != 0;
+                        byte rawLevel = (byte)(batByte & 0x0F);
+
+                        // Convert raw level to percentage
+                        int percentage = charging
+                            ? (int)((rawLevel * 100) / 11)
+                            : (int)((rawLevel * 100) / 8);
+                        percentage = Math.Min(100, Math.Max(0, percentage));
+
+                        BatteryPercentage = percentage;
                         LastSeen = DateTime.Now;
-                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read: {BatteryPercentage}%");
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read: {BatteryPercentage}% (report_id=0x{reportId:X2}, charging={charging}, raw_level={rawLevel})");
+                    }
+                    else
+                    {
+                        // Fallback: report format not recognized
+                        Trace.WriteLine($"[DS4Controller] Battery read failed: unknown report format (report_id=0x{reportId:X2}, length={_lastInputReport.Length})");
                     }
                 }
             }
@@ -114,7 +145,7 @@ namespace DS4BatteryMapper
                     report[1] = 0x80;       // Header (enables output mode)
                     report[3] = 0xFF;       // Enable flags (Rumble + Lightbar + others)
                     
-                    report[6] = 0x00;       // Small rumble (set to 0 for now, can adjust)
+                    report[6] = 0x00;       // Small rumble
                     report[7] = 0x00;       // Large rumble
                     report[8] = red;
                     report[9] = green;
@@ -132,8 +163,6 @@ namespace DS4BatteryMapper
                     report[77] = (byte)((crc >> 24) & 0xFF);
 
                     Trace.WriteLine($"SetLightbar BT: Sending 78-byte report with CRC 0x{crc:X8}");
-                    Trace.WriteLine($"SetLightbar BT: Report bytes [0..10]: {BitConverter.ToString(report, 0, 11)}");
-                    Trace.WriteLine($"SetLightbar BT: CRC bytes [74..77]: {BitConverter.ToString(report, 74, 4)}");
 
                     bool ok = _device.Write(report);
                     Trace.WriteLine($"SetLightbar BT: Write returned {ok}");
@@ -158,7 +187,6 @@ namespace DS4BatteryMapper
                     report[8] = blue;
 
                     Trace.WriteLine($"SetLightbar USB: Sending 32-byte report");
-                    Trace.WriteLine($"SetLightbar USB: Report bytes [0..8]: {BitConverter.ToString(report, 0, 9)}");
 
                     bool ok = _device.Write(report);
                     Trace.WriteLine($"SetLightbar USB: Write returned {ok}");
