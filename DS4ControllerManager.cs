@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using HidLibrary;
 
 namespace DS4BatteryMapper
@@ -47,31 +49,40 @@ namespace DS4BatteryMapper
                         // Recognize DS4 by VID/PID for Sony (0x054C: PlayStation) and DS4 wireless PID 0x09CC
                         if (vid == 0x054C && (pid == 0x09CC || pid == 0x09C0 || pid == 0x05C4))
                         {
-                            // Test read to verify device is actually functional
+                            // Test read with timeout to verify device is actually functional
                             bool isHealthy = false;
                             try
                             {
                                 if (!d.IsOpen)
                                     d.OpenDevice();
 
-                                var testRead = d.Read();
-                                if (testRead.Status == HidDeviceData.ReadStatus.Success && testRead.Data.Length > 0)
+                                // Use a task with timeout to avoid blocking on ghost devices
+                                var testReadTask = Task.Run(() => d.Read());
+                                if (testReadTask.Wait(TimeSpan.FromMilliseconds(500)))
                                 {
-                                    byte reportId = testRead.Data[0];
-                                    // Accept only valid report IDs (0x01 for USB, 0x11 for Bluetooth)
-                                    if (reportId == 0x01 || reportId == 0x11)
+                                    var testRead = testReadTask.Result;
+                                    if (testRead.Status == HidDeviceData.ReadStatus.Success && testRead.Data.Length > 0)
                                     {
-                                        isHealthy = true;
-                                        log.Add($"[DS4Manager] Test read succeeded with valid report_id=0x{reportId:X2}");
+                                        byte reportId = testRead.Data[0];
+                                        // Accept only valid report IDs (0x01 for USB, 0x11 for Bluetooth)
+                                        if (reportId == 0x01 || reportId == 0x11)
+                                        {
+                                            isHealthy = true;
+                                            log.Add($"[DS4Manager] Test read succeeded with valid report_id=0x{reportId:X2}");
+                                        }
+                                        else
+                                        {
+                                            log.Add($"[DS4Manager] Test read got invalid report_id=0x{reportId:X2}, skipping device");
+                                        }
                                     }
                                     else
                                     {
-                                        log.Add($"[DS4Manager] Test read got invalid report_id=0x{reportId:X2}, skipping device");
+                                        log.Add($"[DS4Manager] Test read failed with status={testRead.Status}, skipping device");
                                     }
                                 }
                                 else
                                 {
-                                    log.Add($"[DS4Manager] Test read failed with status={testRead.Status}, skipping device");
+                                    log.Add($"[DS4Manager] Test read timed out (500ms), skipping device");
                                 }
                             }
                             catch (Exception testEx)
@@ -104,7 +115,7 @@ namespace DS4BatteryMapper
                             }
                             else
                             {
-                                // Reuse existing controller (don't reset health; it's working)
+                                // Reuse existing controller
                                 log.Add($"[DS4Manager] Reusing existing controller for {path}");
                             }
 
