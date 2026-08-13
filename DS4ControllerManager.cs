@@ -13,7 +13,7 @@ namespace DS4BatteryMapper
     public class DS4ControllerManager : IDisposable
     {
         private readonly object _lock = new object();
-        // keyed by device mac address or unique identifier extracted from the device path
+        // keyed by device instance ID (hardware identifier unique to each physical device)
         private readonly Dictionary<string, DS4Controller> _controllers = new Dictionary<string, DS4Controller>(StringComparer.OrdinalIgnoreCase);
 
         public DS4ControllerManager()
@@ -91,9 +91,9 @@ namespace DS4BatteryMapper
                                 continue;
                             }
 
-                            // Extract MAC address from device path for deduplication
-                            // Bluetooth paths typically contain a MAC address-like pattern
-                            var key = ExtractMacAddress(path) ?? ExtractDeviceKey(path) ?? path;
+                            // Extract device instance ID - the unique hardware identifier
+                            // Format: #9&XXXXXXXX& (Bluetooth) or #8&XXXXXXXX& (USB)
+                            var key = ExtractDeviceInstanceId(path);
                             log.Add($"[DS4Manager] Extracted key: {key}");
                             foundKeys.Add(key);
 
@@ -160,34 +160,26 @@ namespace DS4BatteryMapper
             }
         }
 
-        // Extract MAC address (format: XX:XX:XX:XX:XX:XX or variations with underscores)
-        private string? ExtractMacAddress(string devicePath)
+        // Extract device instance ID from the device path.
+        // Both Bluetooth and USB DS4 paths contain an 8-hex identifier that is unique to the physical device.
+        // Bluetooth: ...#9&22f644e1&0&0000#...
+        // USB:       ...#8&13fd67a1&0&0000#...
+        // We extract the 8-hex value after the # and & to get the instance ID.
+        private string ExtractDeviceInstanceId(string devicePath)
         {
-            if (string.IsNullOrEmpty(devicePath)) return null;
+            if (string.IsNullOrEmpty(devicePath))
+                return devicePath ?? "unknown";
 
-            // Look for patterns like "vid&0002054c_pid&09cc#9&22f644e1_0_0000" where 22f644e1 is a unique ID
-            // or Bluetooth addresses in format XX:XX:XX:XX:XX:XX, XX_XX_XX_XX_XX_XX, etc.
-            var m = Regex.Match(devicePath, @"_([0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2}[_:][0-9A-Fa-f]{2})_", RegexOptions.IgnoreCase);
+            // Match pattern: #<digit>&<8-hex>&
+            // This covers both #9&XXXXXXXX& and #8&XXXXXXXX&
+            var m = Regex.Match(devicePath, @"#\d&([0-9A-Fa-f]{8})&");
             if (m.Success && m.Groups.Count > 1)
             {
                 return m.Groups[1].Value.ToLowerInvariant();
             }
 
-            return null;
-        }
-
-        // Extract device key from the path (8-hex identifier after #9&)
-        private string? ExtractDeviceKey(string devicePath)
-        {
-            if (string.IsNullOrEmpty(devicePath)) return null;
-
-            var m = Regex.Match(devicePath, @"#9&([0-9A-Fa-f]{8})&");
-            if (m.Success && m.Groups.Count > 1)
-            {
-                return m.Groups[1].Value.ToLowerInvariant();
-            }
-
-            return null;
+            // Fallback: return the full path if we can't extract the ID
+            return devicePath.ToLowerInvariant();
         }
 
         public void Dispose()
