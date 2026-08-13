@@ -30,6 +30,18 @@ namespace DS4BatteryMapper
             _createdAt = DateTime.Now;
         }
 
+        /// <summary>
+        /// Reset the health status and failure counter when the controller is rediscovered.
+        /// This allows previously-unhealthy controllers to be given another chance.
+        /// </summary>
+        public void ResetHealth()
+        {
+            IsHealthy = true;
+            _consecutiveReadFailures = 0;
+            _createdAt = DateTime.Now;  // Reset grace period timer
+            Trace.WriteLine($"[DS4Controller] {DeviceName} health reset");
+        }
+
         public void UpdateBatteryStatus()
         {
             try
