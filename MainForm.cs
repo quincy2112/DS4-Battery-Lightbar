@@ -24,7 +24,7 @@ namespace DS4BatteryMapper
         private Dictionary<string, Panel> _controllerUIPanels = new Dictionary<string, Panel>();
         private NotifyIcon? _trayIcon;
         private ContextMenuStrip? _trayMenu;
-        private bool _allowClose = false;
+        private bool _forceExit = false;
 
         public MainForm()
         {
@@ -182,21 +182,17 @@ namespace DS4BatteryMapper
         private void ShowWindow()
         {
             Trace.WriteLine("[MainForm] ShowWindow called");
-            _allowClose = false;
             this.WindowState = FormWindowState.Normal;
             this.Show();
             this.Activate();
             this.Focus();
-            
-            // Allow close only after a brief delay to avoid race condition with tray menu
-            Task.Delay(200).ContinueWith(_ => _allowClose = true);
             Trace.WriteLine("[MainForm] ShowWindow complete");
         }
 
         private void ExitApplication()
         {
             Trace.WriteLine("[MainForm] ExitApplication called");
-            _allowClose = true;
+            _forceExit = true;
             // Properly dispose before exiting
             _uiTimer?.Stop();
             _uiTimer?.Dispose();
@@ -205,7 +201,7 @@ namespace DS4BatteryMapper
             _controllerManager?.Dispose();
             _trayIcon?.Dispose();
             _trayMenu?.Dispose();
-            Application.Exit();
+            this.Close();
         }
 
         private Button CreateColorButton(Color color, EventHandler onClick)
@@ -529,26 +525,19 @@ namespace DS4BatteryMapper
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            Trace.WriteLine($"[MainForm] OnFormClosing: CloseReason={e.CloseReason}, _allowClose={_allowClose}");
+            Trace.WriteLine($"[MainForm] OnFormClosing: CloseReason={e.CloseReason}, _forceExit={_forceExit}");
             
-            if (!_allowClose && e.CloseReason == CloseReason.UserClosing)
+            if (!_forceExit && e.CloseReason == CloseReason.UserClosing)
             {
-                // Minimize to tray instead of closing
+                // User clicked X: minimize to tray
                 e.Cancel = true;
                 this.WindowState = FormWindowState.Minimized;
                 this.Hide();
-                Trace.WriteLine("[MainForm] Hiding window to tray");
+                Trace.WriteLine("[MainForm] Minimizing to tray");
             }
-            else if (_allowClose)
+            else
             {
-                // Allow exit
-                _uiTimer?.Stop();
-                _uiTimer?.Dispose();
-                _pollTimer?.Stop();
-                _pollTimer?.Dispose();
-                _controllerManager?.Dispose();
-                _trayIcon?.Dispose();
-                _trayMenu?.Dispose();
+                // Exit from tray menu or other reason: allow close
                 Trace.WriteLine("[MainForm] Allowing application exit");
             }
         }
