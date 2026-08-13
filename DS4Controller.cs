@@ -11,15 +11,18 @@ namespace DS4BatteryMapper
     {
         private HidDevice _device;
         private byte[] _lastInputReport;
+        private int _consecutiveReadFailures = 0;
+        private const int MAX_CONSECUTIVE_FAILURES = 3;
 
         public string DeviceName => _device?.Description ?? "Unknown";
         public int BatteryPercentage { get; private set; }
         public DateTime? LastSeen { get; private set; }
+        public bool IsHealthy { get; private set; } = true;
 
         public DS4Controller(HidDevice device)
         {
             _device = device;
-            _lastInputReport = new byte[64];
+            _lastInputReport = new byte[256];
             BatteryPercentage = -1;
             LastSeen = null;
         }
@@ -29,7 +32,11 @@ namespace DS4BatteryMapper
             try
             {
                 if (!_device.IsConnected)
+                {
+                    Trace.WriteLine($"[DS4Controller] {DeviceName} not connected");
+                    IsHealthy = false;
                     return;
+                }
 
                 if (!_device.IsOpen)
                     _device.OpenDevice();
@@ -40,9 +47,36 @@ namespace DS4BatteryMapper
                     _lastInputReport = data.Data;
 
                     // Determine report type and extract battery from the correct offset
-                    // USB: report id 0x01, battery at data_start=1, offset +11 -> byte 12 total
-                    // Bluetooth: report id 0x11, battery at data_start=3, offset +29 -> byte 32 total
                     byte reportId = _lastInputReport[0];
+
+                    // Skip malformed reports (report_id=0x00 indicates garbage/feature report)
+                    if (reportId == 0x00)
+                    {
+                        _consecutiveReadFailures++;
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} got malformed report (id=0x00, len={_lastInputReport.Length}), failures={_consecutiveReadFailures}");
+                        
+                        if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                        {
+                            Trace.WriteLine($"[DS4Controller] {DeviceName} exceeded max consecutive failures, marking unhealthy and reopening device");
+                            IsHealthy = false;
+                            try
+                            {
+                                _device.CloseDevice();
+                                System.Threading.Thread.Sleep(100);
+                                _device.OpenDevice();
+                            }
+                            catch (Exception ex)
+                            {
+                                Trace.WriteLine($"[DS4Controller] Failed to reopen device: {ex}");
+                            }
+                        }
+                        return;
+                    }
+
+                    // Reset failure counter on successful read
+                    _consecutiveReadFailures = 0;
+                    IsHealthy = true;
+
                     int dataStart = -1;
 
                     if (reportId == 0x01)
@@ -76,13 +110,35 @@ namespace DS4BatteryMapper
                     else
                     {
                         // Fallback: report format not recognized
-                        Trace.WriteLine($"[DS4Controller] Battery read failed: unknown report format (report_id=0x{reportId:X2}, length={_lastInputReport.Length})");
+                        _consecutiveReadFailures++;
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read failed: unknown report format (report_id=0x{reportId:X2}, length={_lastInputReport.Length})");
+                        
+                        if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                        {
+                            IsHealthy = false;
+                        }
+                    }
+                }
+                else
+                {
+                    _consecutiveReadFailures++;
+                    Trace.WriteLine($"[DS4Controller] {DeviceName} read failed with status={data.Status}, failures={_consecutiveReadFailures}");
+                    
+                    if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                    {
+                        IsHealthy = false;
                     }
                 }
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"Error reading DS4 data: {ex.Message}");
+                _consecutiveReadFailures++;
+                Trace.WriteLine($"Error reading DS4 data: {ex}");
+                
+                if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                {
+                    IsHealthy = false;
+                }
             }
         }
 
@@ -119,6 +175,7 @@ namespace DS4BatteryMapper
                 if (!_device.IsConnected)
                 {
                     Trace.WriteLine("SetLightbar: device not connected");
+                    IsHealthy = false;
                     return;
                 }
 
@@ -199,10 +256,12 @@ namespace DS4BatteryMapper
                 }
 
                 Trace.WriteLine("SetLightbar: Write failed for both USB and Bluetooth formats.");
+                IsHealthy = false;
             }
             catch (Exception ex)
             {
                 Trace.WriteLine($"SetLightbar: unexpected error: {ex}");
+                IsHealthy = false;
             }
         }
 

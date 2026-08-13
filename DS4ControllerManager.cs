@@ -20,6 +20,7 @@ namespace DS4BatteryMapper
 
         // Lightweight enumeration that deduplicates multiple HID collections that belong to the same physical device.
         // Returns the current set of DS4Controller objects (reused across calls when possible).
+        // Also removes stale/unhealthy controllers from the cache.
         public List<DS4Controller> GetConnectedControllers()
         {
             var log = new List<string>();
@@ -28,6 +29,8 @@ namespace DS4BatteryMapper
             {
                 var devices = HidDevices.Enumerate().ToList();
                 log.Add($"[DS4Manager] Total HID devices: {devices.Count}");
+
+                var foundKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var d in devices)
                 {
@@ -46,6 +49,7 @@ namespace DS4BatteryMapper
                         {
                             // extract a dedupe key (prefer Bluetooth address-like substring if present)
                             var key = ExtractDeviceKey(path) ?? path;
+                            foundKeys.Add(key);
 
                             if (!_controllers.ContainsKey(key))
                             {
@@ -62,15 +66,7 @@ namespace DS4BatteryMapper
                             }
                             else
                             {
-                                // Update the underlying HidDevice reference if necessary
-                                // (HidLibrary may return a new HidDevice instance for the same path; replace it)
-                                try
-                                {
-                                    var existing = _controllers[key];
-                                    // If the device path differs (shouldn't) keep existing. We'll keep existing HidDevice instance.
-                                }
-                                catch { }
-
+                                log.Add($"[DS4Manager] Reusing existing controller for {path}");
                             }
 
                             log.Add($"[DS4Manager] Recognized DS4: {path}");
@@ -82,12 +78,23 @@ namespace DS4BatteryMapper
                     }
                 }
 
-                // Build the result list from the dictionary values
+                // Remove stale controllers that are no longer in the device list
+                var stalesToRemove = _controllers.Keys.Where(k => !foundKeys.Contains(k)).ToList();
+                foreach (var key in stalesToRemove)
+                {
+                    log.Add($"[DS4Manager] Removing stale controller: {key}");
+                    _controllers[key].Dispose();
+                    _controllers.Remove(key);
+                }
+
+                // Build the result list from the dictionary values, filtering out unhealthy controllers
                 var result = new List<DS4Controller>();
                 lock (_lock)
                 {
-                    result = _controllers.Values.ToList();
+                    result = _controllers.Values.Where(c => c.IsHealthy).ToList();
                 }
+
+                log.Add($"[DS4Manager] Returning {result.Count} healthy controller(s) (total cached: {_controllers.Count})");
 
                 // Persist device enumeration for debugging
                 try
@@ -105,7 +112,7 @@ namespace DS4BatteryMapper
             catch (Exception ex)
             {
                 Trace.WriteLine($"[DS4Manager] Enumeration failed: {ex}");
-                return _controllers.Values.ToList();
+                return _controllers.Values.Where(c => c.IsHealthy).ToList();
             }
         }
 
