@@ -22,12 +22,15 @@ namespace DS4BatteryMapper
         private Label? _statusLabel;
         private FlowLayoutPanel? _controllerPanel;
         private Dictionary<string, Panel> _controllerUIPanels = new Dictionary<string, Panel>();
+        private NotifyIcon? _trayIcon;
+        private ContextMenuStrip? _trayMenu;
 
         public MainForm()
         {
             InitializeComponent();
             _controllerManager = new DS4ControllerManager();
             InitializeUI();
+            InitializeTrayIcon();
             StartMonitoring();
         }
 
@@ -156,6 +159,37 @@ namespace DS4BatteryMapper
             mainTable.Controls.Add(_statusLabel, 0, 3);
 
             this.Controls.Add(mainTable);
+        }
+
+        private void InitializeTrayIcon()
+        {
+            _trayMenu = new ContextMenuStrip();
+            _trayMenu.Items.Add("Show", null, (s, e) => ShowWindow());
+            _trayMenu.Items.Add("Exit", null, (s, e) => ExitApplication());
+
+            _trayIcon = new NotifyIcon()
+            {
+                Icon = SystemIcons.Application,
+                ContextMenuStrip = _trayMenu,
+                Visible = true,
+                Text = "DS4 Battery Lightbar Mapper"
+            };
+
+            _trayIcon.DoubleClick += (s, e) => ShowWindow();
+        }
+
+        private void ShowWindow()
+        {
+            this.WindowState = FormWindowState.Normal;
+            this.Show();
+            this.Activate();
+        }
+
+        private void ExitApplication()
+        {
+            _trayIcon?.Dispose();
+            _trayMenu?.Dispose();
+            Application.Exit();
         }
 
         private Button CreateColorButton(Color color, EventHandler onClick)
@@ -479,12 +513,24 @@ namespace DS4BatteryMapper
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            _uiTimer?.Stop();
-            _uiTimer?.Dispose();
-            _pollTimer?.Stop();
-            _pollTimer?.Dispose();
-            _controllerManager?.Dispose();
-            base.OnFormClosing(e);
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                // Minimize to tray instead of closing
+                e.Cancel = true;
+                this.WindowState = FormWindowState.Minimized;
+                this.Hide();
+            }
+            else
+            {
+                // Allow exit on other close reasons
+                _uiTimer?.Stop();
+                _uiTimer?.Dispose();
+                _pollTimer?.Stop();
+                _pollTimer?.Dispose();
+                _controllerManager?.Dispose();
+                _trayIcon?.Dispose();
+                _trayMenu?.Dispose();
+            }
         }
     }
 }
