@@ -80,8 +80,9 @@ namespace DS4BatteryMapper
                 return;
 
             var controllers = _controllerManager.GetConnectedControllers();
-            var controllerPanel = this.Controls["ControllerPanel"] as Panel;
-            
+            // The ControllerPanel is nested inside the main panel, so use Controls.Find to locate it anywhere in the form.
+            var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;
+
             if (controllerPanel == null)
                 return;
 
@@ -98,6 +99,13 @@ namespace DS4BatteryMapper
                     Font = new Font("Segoe UI", 10)
                 };
                 controllerPanel.Controls.Add(noLabel);
+
+                var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
+                if (statusLabel != null)
+                {
+                    statusLabel.Text = "No DS4 controllers detected";
+                }
+
                 return;
             }
 
@@ -109,10 +117,10 @@ namespace DS4BatteryMapper
                 yOffset += 130;
             }
 
-            var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
-            if (statusLabel != null)
+            var statusLabel2 = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
+            if (statusLabel2 != null)
             {
-                statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
+                statusLabel2.Text = $"Monitoring {controllers.Count} controller(s)";
             }
         }
 
