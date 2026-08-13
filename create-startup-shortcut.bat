@@ -9,7 +9,7 @@ REM Remove trailing backslash
 set "SCRIPT_DIR=!SCRIPT_DIR:~0,-1!"
 
 REM Get the app executable path
-set "APP_PATH=!SCRIPT_DIR!\bin\Release\net6.0-windows\DS4-Battery-Lightbar.exe"
+set "APP_PATH=!SCRIPT_DIR!\bin\Release\net6.0-windows\DS4BatteryMapper.exe"
 
 REM Check if the app exists
 if not exist "!APP_PATH!" (
