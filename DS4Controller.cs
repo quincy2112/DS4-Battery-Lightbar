@@ -12,7 +12,9 @@ namespace DS4BatteryMapper
         private HidDevice _device;
         private byte[] _lastInputReport;
         private int _consecutiveReadFailures = 0;
-        private const int MAX_CONSECUTIVE_FAILURES = 3;
+        private const int MAX_CONSECUTIVE_FAILURES = 5;  // Increased grace period
+        private DateTime _createdAt = DateTime.Now;
+        private const int GRACE_PERIOD_MS = 2000;  // 2 second grace period for new controllers
 
         public string DeviceName => _device?.Description ?? "Unknown";
         public int BatteryPercentage { get; private set; }
@@ -25,6 +27,7 @@ namespace DS4BatteryMapper
             _lastInputReport = new byte[256];
             BatteryPercentage = -1;
             LastSeen = null;
+            _createdAt = DateTime.Now;
         }
 
         public void UpdateBatteryStatus()
@@ -55,9 +58,10 @@ namespace DS4BatteryMapper
                         _consecutiveReadFailures++;
                         Trace.WriteLine($"[DS4Controller] {DeviceName} got malformed report (id=0x00, len={_lastInputReport.Length}), failures={_consecutiveReadFailures}");
                         
-                        if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                        // Only mark unhealthy after grace period + max failures
+                        if (IsPassedGracePeriod() && _consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                         {
-                            Trace.WriteLine($"[DS4Controller] {DeviceName} exceeded max consecutive failures, marking unhealthy and reopening device");
+                            Trace.WriteLine($"[DS4Controller] {DeviceName} exceeded max consecutive failures after grace period, marking unhealthy and reopening device");
                             IsHealthy = false;
                             try
                             {
@@ -113,7 +117,7 @@ namespace DS4BatteryMapper
                         _consecutiveReadFailures++;
                         Trace.WriteLine($"[DS4Controller] {DeviceName} battery read failed: unknown report format (report_id=0x{reportId:X2}, length={_lastInputReport.Length})");
                         
-                        if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                        if (IsPassedGracePeriod() && _consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                         {
                             IsHealthy = false;
                         }
@@ -124,7 +128,7 @@ namespace DS4BatteryMapper
                     _consecutiveReadFailures++;
                     Trace.WriteLine($"[DS4Controller] {DeviceName} read failed with status={data.Status}, failures={_consecutiveReadFailures}");
                     
-                    if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                    if (IsPassedGracePeriod() && _consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                     {
                         IsHealthy = false;
                     }
@@ -135,11 +139,16 @@ namespace DS4BatteryMapper
                 _consecutiveReadFailures++;
                 Trace.WriteLine($"Error reading DS4 data: {ex}");
                 
-                if (_consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
+                if (IsPassedGracePeriod() && _consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                 {
                     IsHealthy = false;
                 }
             }
+        }
+
+        private bool IsPassedGracePeriod()
+        {
+            return (DateTime.Now - _createdAt).TotalMilliseconds > GRACE_PERIOD_MS;
         }
 
         /// <summary>
