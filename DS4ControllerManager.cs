@@ -65,7 +65,8 @@ namespace DS4BatteryMapper
                     continue;
                 }
 
-                string devicePath = device.Description ?? $"DS4_{device.Attributes.ProductId}";
+                // Use stable device identifier (serial/device path) as the dictionary key to avoid repeated create/dispose cycles
+                string devicePath = serial ?? device.Description ?? $"DS4_{device.Attributes.ProductId}";
                 _debugLog.AppendLine($"  -> Recognized as DS4!");
                 Debug.WriteLine($"[DS4Manager] Recognized DS4: {devicePath}");
 
