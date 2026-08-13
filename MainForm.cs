@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace DS4BatteryMapper
@@ -75,59 +76,32 @@ namespace DS4BatteryMapper
             _updateTimer.Start();
         }
 
-        private void UpdateControllerStatus(object? sender, EventArgs e)
+        // Run device I/O off the UI thread to avoid freezing the form.
+        private async void UpdateControllerStatus(object? sender, EventArgs e)
         {
+            if (_controllerManager == null)
+                return;
+
+            List<DS4Controller> controllers = new List<DS4Controller>();
+
             try
             {
-                Debug.WriteLine("[MainForm] Tick - updating controllers");
-
-                if (_controllerManager == null)
-                    return;
-
-                var controllers = _controllerManager.GetConnectedControllers();
-
-                var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;
-                var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
-
-                if (controllerPanel == null)
+                // Perform enumeration and device I/O on a background thread
+                controllers = await Task.Run(() =>
                 {
-                    Debug.WriteLine("[MainForm] ControllerPanel not found");
-                    if (statusLabel != null) statusLabel.Text = "UI error: Controller panel not found";
-                    return;
-                }
+                    var list = _controllerManager.GetConnectedControllers();
 
-                controllerPanel.Controls.Clear();
-
-                if (controllers == null || controllers.Count == 0)
-                {
-                    var noLabel = new Label
+                    foreach (var controller in list)
                     {
-                        Text = "No DS4 controllers detected",
-                        AutoSize = true,
-                        ForeColor = Color.Gray,
-                        Font = new Font("Segoe UI", 10)
-                    };
-                    controllerPanel.Controls.Add(noLabel);
+                        try
+                        {
+                            controller.UpdateBatteryStatus();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine("[MainForm] Error updating battery (background): " + ex);
+                        }
 
-                    if (statusLabel != null)
-                        statusLabel.Text = "No DS4 controllers detected";
-
-                    Debug.WriteLine("[MainForm] No controllers found");
-                    return;
-                }
-
-                int yOffset = 10;
-                foreach (var controller in controllers)
-                {
-                    try
-                    {
-                        // Refresh battery reading each tick
-                        try { controller.UpdateBatteryStatus(); } catch (Exception ex) { Debug.WriteLine("[MainForm] Error updating battery: " + ex); }
-
-                        var controllerUI = CreateControllerUI(controller, yOffset);
-                        controllerPanel.Controls.Add(controllerUI);
-
-                        // Set the actual controller lightbar to match the UI preview color
                         try
                         {
                             var battery = Math.Max(0, Math.Min(100, controller?.BatteryPercentage ?? 0));
@@ -136,28 +110,61 @@ namespace DS4BatteryMapper
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine("[MainForm] Error setting lightbar: " + ex);
+                            Debug.WriteLine("[MainForm] Error setting lightbar (background): " + ex);
                         }
-
-                        yOffset += 130;
                     }
-                    catch (Exception uiEx)
-                    {
-                        Debug.WriteLine("[MainForm] Error creating controller UI: " + uiEx);
-                    }
-                }
 
-                if (statusLabel != null)
-                    statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
-
-                Debug.WriteLine($"[MainForm] Displaying {controllers.Count} controller(s)");
+                    return list;
+                });
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("[MainForm] UpdateControllerStatus error: " + ex);
+                Debug.WriteLine("[MainForm] Background controller update failed: " + ex);
+                var statusLabelErr = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
+                if (statusLabelErr != null)
+                    statusLabelErr.Text = "Error during device update";
+                return;
+            }
+
+            // UI update must run on UI thread (we're back on UI thread after await)
+            var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;
+            if (controllerPanel == null)
+                return;
+
+            controllerPanel.Controls.Clear();
+
+            if (controllers == null || controllers.Count == 0)
+            {
+                var noLabel = new Label
+                {
+                    Text = "No DS4 controllers detected",
+                    AutoSize = true,
+                    ForeColor = Color.Gray,
+                    Font = new Font("Segoe UI", 10)
+                };
+                controllerPanel.Controls.Add(noLabel);
+
                 var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
                 if (statusLabel != null)
-                    statusLabel.Text = "Error: " + (ex.Message ?? "unknown");
+                {
+                    statusLabel.Text = "No DS4 controllers detected";
+                }
+
+                return;
+            }
+
+            int yOffset = 10;
+            foreach (var controller in controllers)
+            {
+                var controllerUI = CreateControllerUI(controller, yOffset);
+                controllerPanel.Controls.Add(controllerUI);
+                yOffset += 130;
+            }
+
+            var statusLabelFinal = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
+            if (statusLabelFinal != null)
+            {
+                statusLabelFinal.Text = $"Monitoring {controllers.Count} controller(s)";
             }
         }
 
