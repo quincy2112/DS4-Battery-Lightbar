@@ -1,95 +1,198 @@
 using System;
-using System.Reflection;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
+using HidLibrary;
 
-namespace DS4BatteryLightbar
+namespace DS4BatteryMapper
 {
-    /// <summary>
-    /// Helper to retrieve a controller serial without depending on a single HID library API.
-    /// This uses reflection to try common property/method names (SerialNumber, GetSerialNumber, DevicePath, etc.)
-    /// so it compiles even if the HidDevice type in the user's project doesn't expose SerialNumber directly.
-    /// </summary>
-    public static class DS4ControllerManager
+    public class DS4ControllerManager : IDisposable
     {
-        /// <summary>
-        /// Attempts to obtain a serial/unique identifier from a HID device object using reflection.
-        /// Returns null if none found.
-        /// </summary>
-        public static string GetSerialNumber(object device)
+        private readonly object _lock = new object();
+        // keyed by device instance ID (hardware identifier unique to each physical device)
+        private readonly Dictionary<string, DS4Controller> _controllers = new Dictionary<string, DS4Controller>(StringComparer.OrdinalIgnoreCase);
+
+        public DS4ControllerManager()
         {
-            if (device == null) return null;
-            Type t = device.GetType();
+        }
 
-            // Try common property names first.
-            string[] propNames = new[] { "SerialNumber", "Serial", "DevicePath", "Path", "DeviceId" };
-            foreach (var name in propNames)
+        public List<DS4Controller> GetConnectedControllers()
+        {
+            var log = new List<string>();
+
+            try
             {
-                var prop = t.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (prop != null)
+                var devices = HidDevices.Enumerate().ToList();
+                log.Add($"[DS4Manager] Total HID devices: {devices.Count}");
+
+                var foundKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var d in devices)
                 {
                     try
                     {
-                        var val = prop.GetValue(device);
-                        if (val != null) return val.ToString();
-                    }
-                    catch { /* ignore and continue trying other options */ }
-                }
-            }
+                        var desc = d.Description ?? "(no desc)";
+                        var vid = d.Attributes?.VendorId ?? 0;
+                        var pid = d.Attributes?.ProductId ?? 0;
+                        var path = d.DevicePath ?? "";
+                        var isConn = d.IsConnected;
 
-            // Try common method names that return serials.
-            string[] methodNames = new[] { "GetSerialNumber", "GetSerialNumberString", "GetSerial", "ReadSerialNumber" };
-            foreach (var mname in methodNames)
-            {
-                var method = t.GetMethod(mname, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase, Type.DefaultBinder, Type.EmptyTypes, null);
-                if (method != null)
-                {
-                    try
-                    {
-                        var result = method.Invoke(device, null);
-                        if (result is Task task)
+                        log.Add($"[DS4Manager] Device: {desc}, VID: 0x{vid:X4}, PID: 0x{pid:X4}, Path={path}, IsConnected={isConn}");
+
+                        // Recognize DS4 by VID/PID
+                        if (vid == 0x054C && (pid == 0x09CC || pid == 0x09C0 || pid == 0x05C4))
                         {
-                            // Wait for the async call to complete and try to read Result
-                            task.Wait();
-                            var resProp = task.GetType().GetProperty("Result");
-                            if (resProp != null)
+                            // Test read with timeout to verify device is functional
+                            bool isHealthy = false;
+                            try
                             {
-                                var res = resProp.GetValue(task);
-                                if (res != null) return res.ToString();
+                                if (!d.IsOpen)
+                                    d.OpenDevice();
+
+                                var testReadTask = Task.Run(() => d.Read());
+                                if (testReadTask.Wait(TimeSpan.FromMilliseconds(2000)))
+                                {
+                                    var testRead = testReadTask.Result;
+                                    if (testRead.Status == HidDeviceData.ReadStatus.Success && testRead.Data.Length > 0)
+                                    {
+                                        byte reportId = testRead.Data[0];
+                                        if (reportId == 0x01 || reportId == 0x11)
+                                        {
+                                            isHealthy = true;
+                                            log.Add($"[DS4Manager] Test read succeeded with valid report_id=0x{reportId:X2}");
+                                        }
+                                        else
+                                        {
+                                            log.Add($"[DS4Manager] Test read got invalid report_id=0x{reportId:X2}, skipping device");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        log.Add($"[DS4Manager] Test read failed with status={testRead.Status}, skipping device");
+                                    }
+                                }
+                                else
+                                {
+                                    log.Add($"[DS4Manager] Test read timed out (2000ms), skipping device");
+                                }
                             }
-                        }
-                        else if (result != null)
-                        {
-                            return result.ToString();
+                            catch (Exception testEx)
+                            {
+                                log.Add($"[DS4Manager] Test read exception: {testEx.Message}, skipping device");
+                            }
+
+                            if (!isHealthy)
+                            {
+                                log.Add($"[DS4Manager] Skipping unhealthy DS4: {path}");
+                                continue;
+                            }
+
+                            // Extract device instance ID - the unique hardware identifier
+                            // Format: #9&XXXXXXXX& (Bluetooth) or #8&XXXXXXXX& (USB)
+                            var key = ExtractDeviceInstanceId(path);
+                            log.Add($"[DS4Manager] Extracted key: {key}");
+                            foundKeys.Add(key);
+
+                            if (!_controllers.ContainsKey(key))
+                            {
+                                try
+                                {
+                                    var controller = new DS4Controller(d);
+                                    _controllers[key] = controller;
+                                    log.Add($"[DS4Manager] Created new controller for {path}");
+                                }
+                                catch (Exception cex)
+                                {
+                                    log.Add($"[DS4Manager] Failed to create controller for {path}: {cex}");
+                                }
+                            }
+                            else
+                            {
+                                log.Add($"[DS4Manager] Reusing existing controller for {path}");
+                            }
+
+                            log.Add($"[DS4Manager] Recognized DS4: {path}");
                         }
                     }
-                    catch { /* ignore and try next */ }
+                    catch (Exception ex)
+                    {
+                        log.Add($"[DS4Manager] Error inspecting HID device: {ex}");
+                    }
                 }
-            }
 
-            // Fallback: try to extract an identifier-like segment from a DevicePath/ToString using regex.
-            string path = null;
-            var dp = t.GetProperty("DevicePath", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
-                     ?? t.GetProperty("Path", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
-                     ?? t.GetProperty("DeviceId", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (dp != null)
+                // Remove stale controllers that are no longer in the device list
+                var stalesToRemove = _controllers.Keys.Where(k => !foundKeys.Contains(k)).ToList();
+                foreach (var key in stalesToRemove)
+                {
+                    log.Add($"[DS4Manager] Removing stale controller: {key}");
+                    _controllers[key].Dispose();
+                    _controllers.Remove(key);
+                }
+
+                var result = new List<DS4Controller>();
+                lock (_lock)
+                {
+                    result = _controllers.Values.ToList();
+                }
+
+                log.Add($"[DS4Manager] Returning {result.Count} controller(s) (total cached: {_controllers.Count})");
+
+                try
+                {
+                    File.WriteAllText("ds4-devices.log", string.Join(Environment.NewLine, log));
+                    Trace.WriteLine($"[DS4Manager] Wrote devices log to {Path.GetFullPath("ds4-devices.log")}");
+                }
+                catch (Exception wex)
+                {
+                    Trace.WriteLine($"[DS4Manager] Failed to write devices log: {wex}");
+                }
+
+                return result;
+            }
+            catch (Exception ex)
             {
-                try { var v = dp.GetValue(device); path = v?.ToString(); } catch { }
+                Trace.WriteLine($"[DS4Manager] Enumeration failed: {ex}");
+                return _controllers.Values.ToList();
             }
+        }
 
-            if (string.IsNullOrEmpty(path))
+        // Extract device instance ID from the device path.
+        // Both Bluetooth and USB DS4 paths contain an 8-hex identifier that is unique to the physical device.
+        // Bluetooth: ...#9&22f644e1&0&0000#...
+        // USB:       ...#8&13fd67a1&0&0000#...
+        // We extract the 8-hex value after the # and & to get the instance ID.
+        private string ExtractDeviceInstanceId(string devicePath)
+        {
+            if (string.IsNullOrEmpty(devicePath))
+                return devicePath ?? "unknown";
+
+            // Match pattern: #<digit>&<8-hex>&
+            // This covers both #9&XXXXXXXX& and #8&XXXXXXXX&
+            var m = Regex.Match(devicePath, @"#\d&([0-9A-Fa-f]{8})&");
+            if (m.Success && m.Groups.Count > 1)
             {
-                // Last resort: use ToString()
-                try { path = device.ToString(); } catch { path = null; }
+                return m.Groups[1].Value.ToLowerInvariant();
             }
 
-            if (!string.IsNullOrEmpty(path))
+            // Fallback: return the full path if we can't extract the ID
+            return devicePath.ToLowerInvariant();
+        }
+
+        public void Dispose()
+        {
+            try
             {
-                var m = Regex.Match(path, @"([^\\&:]+)$");
-                if (m.Success) return m.Groups[1].Value;
+                foreach (var kv in _controllers.Values)
+                {
+                    kv.Dispose();
+                }
+                _controllers.Clear();
             }
-
-            return null;
+            catch { }
         }
     }
 }
