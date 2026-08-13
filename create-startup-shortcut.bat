@@ -22,19 +22,17 @@ if not exist "!APP_PATH!" (
 REM Get the Startup folder path
 set "STARTUP_FOLDER=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 
-REM Create a shortcut using PowerShell
-powershell -NoProfile -Command "^
-$WshShell = New-Object -ComObject WScript.Shell; ^
-$Shortcut = $WshShell.CreateShortcut('%STARTUP_FOLDER%\DS4 Battery Lightbar.lnk'); ^
-$Shortcut.TargetPath = '!APP_PATH!'; ^
-$Shortcut.WorkingDirectory = '!SCRIPT_DIR!'; ^
-$Shortcut.Description = 'DS4 Battery Lightbar Mapper - Runs on startup'; ^
-$Shortcut.Save(); ^
-Write-Host 'Shortcut created at %STARTUP_FOLDER%\DS4 Battery Lightbar.lnk'
-"
+REM Call PowerShell script to create the shortcut
+powershell -NoProfile -ExecutionPolicy Bypass -File "!SCRIPT_DIR!\create-shortcut.ps1" "!APP_PATH!" "!SCRIPT_DIR!"
 
-echo.
-echo Startup shortcut created successfully!
-echo The app will run automatically on the next startup.
-echo You can remove it anytime from: %STARTUP_FOLDER%
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo Startup shortcut created successfully!
+    echo The app will run automatically on the next startup.
+    echo You can remove it anytime from: %STARTUP_FOLDER%
+) else (
+    echo.
+    echo Failed to create startup shortcut.
+)
+
 pause
