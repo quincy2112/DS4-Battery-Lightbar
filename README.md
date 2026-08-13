@@ -6,10 +6,7 @@ A Windows application that reads connected DualShock 4 (DS4) controller(s) and m
 
 - **Real-time monitoring** of connected DS4 controllers
 - **Battery percentage display** with visual progress bar
-- **Lightbar color mapping**:
-  - 🔴 **Red**: 0-33% (Critical)
-  - 🟡 **Yellow**: 33-66% (Warning)  
-  - 🟢 **Green**: 66-100% (Healthy)
+- **Configurable lightbar gradient** between custom low-battery (0%) and high-battery (100%) colors
 - **Live preview** of lightbar color
 - **Auto-detection** of connected/disconnected controllers
 - **Dark theme** UI optimized for gaming setups
@@ -48,17 +45,12 @@ A Windows application that reads connected DualShock 4 (DS4) controller(s) and m
 1. Launch the application
 2. Connect your DS4 controller(s) via USB or Bluetooth
 3. The app will automatically detect connected controllers
-4. Watch the lightbar color and battery percentage update in real-time
+4. Click the low/high battery color swatches to choose custom endpoint colors
+5. Watch the lightbar color and battery percentage update in real-time
 
 ## Color Mapping Logic
 
-The application uses a smooth gradient across three zones:
-
-- **0-33%**: Red → Yellow (Low battery warning)
-- **33-66%**: Yellow → Green (Medium battery)
-- **66-100%**: Green (Full battery)
-
-You can customize this mapping by editing the `BatteryToColor()` method in `MainForm.cs`.
+The application linearly interpolates between the selected low-battery color (0%) and high-battery color (100%) to generate the current lightbar color.
 
 ## Project Structure
 
@@ -89,8 +81,7 @@ MIT License - feel free to use and modify as needed.
 
 ## Future Enhancements
 
-- [ ] Ability to manually set lightbar colors
-- [ ] Custom color schemes and presets
+- [ ] Custom color presets
 - [ ] Battery statistics and history
 - [ ] Support for additional controllers (Xbox, etc.)
 - [ ] Tray icon with quick status
