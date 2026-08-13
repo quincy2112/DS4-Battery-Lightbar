@@ -21,6 +21,7 @@ namespace DS4BatteryMapper
         private Button? _highBatteryColorButton;
         private Label? _statusLabel;
         private FlowLayoutPanel? _controllerPanel;
+        private Dictionary<string, Panel> _controllerUIPanels = new Dictionary<string, Panel>();
 
         public MainForm()
         {
@@ -296,48 +297,97 @@ namespace DS4BatteryMapper
         {
             if (_controllerPanel == null) return;
 
-            // Suspend layout to prevent flashing during updates
-            _controllerPanel.SuspendLayout();
-
-            try
+            // Only rebuild if the controller count changed or if no UI panels exist
+            bool countChanged = controllers.Count != _controllerUIPanels.Count;
+            
+            if (countChanged)
             {
-                _controllerPanel.Controls.Clear();
-
-                if (controllers == null || controllers.Count == 0)
+                // Rebuild the entire UI
+                _controllerPanel.SuspendLayout();
+                try
                 {
-                    var noLabel = new Label
-                    {
-                        Text = "No DS4 controllers detected",
-                        AutoSize = true,
-                        ForeColor = Color.Gray,
-                        Font = new Font("Segoe UI", 10)
-                    };
-                    _controllerPanel.Controls.Add(noLabel);
-                    if (_statusLabel != null)
-                        _statusLabel.Text = "No DS4 controllers detected";
-                    return;
-                }
+                    _controllerPanel.Controls.Clear();
+                    _controllerUIPanels.Clear();
 
+                    if (controllers == null || controllers.Count == 0)
+                    {
+                        var noLabel = new Label
+                        {
+                            Text = "No DS4 controllers detected",
+                            AutoSize = true,
+                            ForeColor = Color.Gray,
+                            Font = new Font("Segoe UI", 10)
+                        };
+                        _controllerPanel.Controls.Add(noLabel);
+                        if (_statusLabel != null)
+                            _statusLabel.Text = "No DS4 controllers detected";
+                        return;
+                    }
+
+                    foreach (var controller in controllers)
+                    {
+                        try
+                        {
+                            var panel = CreateControllerUI(controller);
+                            _controllerUIPanels[controller.DeviceName] = panel;
+                            _controllerPanel.Controls.Add(panel);
+                        }
+                        catch (Exception ex)
+                        {
+                            Trace.WriteLine("[MainForm] Error creating controller UI: " + ex);
+                        }
+                    }
+
+                    if (_statusLabel != null)
+                        _statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
+                }
+                finally
+                {
+                    _controllerPanel.ResumeLayout(true);
+                }
+            }
+            else if (controllers.Count > 0)
+            {
+                // Just update battery values in existing panels (no rebuild)
                 foreach (var controller in controllers)
                 {
-                    try
+                    if (_controllerUIPanels.TryGetValue(controller.DeviceName, out var panel))
                     {
-                        _controllerPanel.Controls.Add(CreateControllerUI(controller));
-                    }
-                    catch (Exception ex)
-                    {
-                        Trace.WriteLine("[MainForm] Error creating controller UI: " + ex);
+                        UpdateControllerBatteryUI(panel, controller);
                     }
                 }
+            }
+        }
 
-                if (_statusLabel != null)
-                    _statusLabel.Text = $"Monitoring {controllers.Count} controller(s)";
-            }
-            finally
+        private void UpdateControllerBatteryUI(Panel panel, DS4Controller controller)
+        {
+            var battery = Math.Max(0, Math.Min(100, controller.BatteryPercentage));
+            var color = BatteryToColor(battery);
+
+            // Update battery label
+            var batteryLabel = panel.Controls.OfType<Label>()
+                .FirstOrDefault(l => l.Text.StartsWith("Battery:"));
+            if (batteryLabel != null)
+                batteryLabel.Text = $"Battery: {battery}%";
+
+            // Update battery bar background panel
+            var barBg = panel.Controls.OfType<Panel>()
+                .FirstOrDefault(p => p.BorderStyle == BorderStyle.FixedSingle && p.Location.Y == 65);
+            if (barBg != null)
             {
-                // Resume layout and trigger single refresh
-                _controllerPanel.ResumeLayout(true);
+                var barFill = barBg.Controls.OfType<Panel>().FirstOrDefault();
+                if (barFill != null)
+                {
+                    barFill.Size = new Size((int)(298 * battery / 100.0), 13);
+                    barFill.BackColor = color;
+                }
             }
+
+            // Update lightbar preview
+            var lightbarPreview = panel.Controls.OfType<Panel>()
+                .FirstOrDefault(p => p.BorderStyle == BorderStyle.FixedSingle && p.Location.Y == 40 && p.Location.X == 350);
+            if (lightbarPreview != null)
+                lightbarPreview.BackColor = color;
         }
 
         private Panel CreateControllerUI(DS4Controller controller)
