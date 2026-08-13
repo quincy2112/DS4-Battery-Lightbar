@@ -46,6 +46,14 @@ namespace DS4BatteryMapper
                 {
                     _lastInputReport = data.Data;
 
+                    // Log full report hex dump
+                    string hexDump = "";
+                    for (int i = 0; i < Math.Min(64, _lastInputReport.Length); i++)
+                    {
+                        hexDump += $"{i:D2}:{_lastInputReport[i]:X2} ";
+                    }
+                    Trace.WriteLine($"[DS4Controller] Report hex (first 64 bytes): {hexDump}");
+
                     // Determine report type and extract battery from the correct offset
                     byte reportId = _lastInputReport[0];
 
@@ -67,21 +75,28 @@ namespace DS4BatteryMapper
                     _consecutiveReadFailures = 0;
                     IsHealthy = true;
 
-                    // Battery is at offset 30 for both USB and Bluetooth
-                    // (for BT it's after the 2-byte header, so absolute offset is still 30 in the normalized input report)
+                    // Battery is at offset 30 for USB (report_id=0x01)
                     if (_lastInputReport.Length > 30)
                     {
                         byte batByte = _lastInputReport[30];
                         bool charging = (batByte & 0x10) != 0;
                         byte rawLevel = (byte)(batByte & 0x0F);
 
-                        // Convert raw level to percentage: 0-15 maps to 0%-100% in 10% increments
-                        int percentage = rawLevel * 10; // 0, 10, 20, 30... 100
+                        // Convert raw level to percentage based on charging state
+                        int percentage;
+                        if (charging)
+                        {
+                            percentage = (int)((rawLevel * 100) / 11);
+                        }
+                        else
+                        {
+                            percentage = (int)((rawLevel * 100) / 8);
+                        }
                         percentage = Math.Min(100, Math.Max(0, percentage));
 
                         BatteryPercentage = percentage;
                         LastSeen = DateTime.Now;
-                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read: {BatteryPercentage}% (report_id=0x{reportId:X2}, charging={charging}, raw_level={rawLevel})");
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} battery read: {BatteryPercentage}% (report_id=0x{reportId:X2}, charging={charging}, raw_level={rawLevel}, byte[30]=0x{batByte:X2})");
                     }
                     else
                     {
