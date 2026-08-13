@@ -104,6 +104,16 @@ namespace DS4BatteryMapper
                 // Run enumeration on background thread briefly
                 var controllers = await Task.Run(() => _controllerManager.GetConnectedControllers());
 
+                Trace.WriteLine($"[MainForm] UIUpdateTick enumerated {controllers.Count} controller(s)");
+
+                // Update status label immediately so the user can see count/time even if detailed UI fails
+                var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
+                if (statusLabel != null)
+                {
+                    statusLabel.Text = $"Last enum: {DateTime.Now:HH:mm:ss} — {controllers.Count} controller(s)";
+                }
+
+                Trace.WriteLine($"[MainForm] Calling UpdateControllerPanel with {controllers.Count} controller(s)");
                 // Update UI with current cached battery values (no blocking calls here)
                 UpdateControllerPanel(controllers);
             }
@@ -159,6 +169,8 @@ namespace DS4BatteryMapper
                         var battery = Math.Max(0, Math.Min(100, controller?.BatteryPercentage ?? 0));
                         var color = BatteryToColor(battery);
 
+                        Trace.WriteLine($"[MainForm] SetLightbar called for {controller.DeviceName} with battery {battery}%");
+
                         var lightTask = Task.Run(() => controller.SetLightbar((byte)color.R, (byte)color.G, (byte)color.B));
                         var finished2 = await Task.WhenAny(lightTask, Task.Delay(1000));
                         if (finished2 != lightTask)
@@ -186,6 +198,8 @@ namespace DS4BatteryMapper
 
         private void UpdateControllerPanel(List<DS4Controller> controllers)
         {
+            Trace.WriteLine($"[MainForm] Entering UpdateControllerPanel with {controllers?.Count ?? 0} controller(s)");
+
             var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;
             var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
 
