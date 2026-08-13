@@ -121,8 +121,24 @@ namespace DS4BatteryMapper
                 {
                     try
                     {
+                        // Refresh battery reading each tick
+                        try { controller.UpdateBatteryStatus(); } catch (Exception ex) { Debug.WriteLine("[MainForm] Error updating battery: " + ex); }
+
                         var controllerUI = CreateControllerUI(controller, yOffset);
                         controllerPanel.Controls.Add(controllerUI);
+
+                        // Set the actual controller lightbar to match the UI preview color
+                        try
+                        {
+                            var battery = Math.Max(0, Math.Min(100, controller?.BatteryPercentage ?? 0));
+                            var color = BatteryToColor(battery);
+                            controller.SetLightbar((byte)color.R, (byte)color.G, (byte)color.B);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine("[MainForm] Error setting lightbar: " + ex);
+                        }
+
                         yOffset += 130;
                     }
                     catch (Exception uiEx)
