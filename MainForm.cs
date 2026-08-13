@@ -100,12 +100,16 @@ namespace DS4BatteryMapper
             _highBatteryColorButton.Location = new Point(455, 42);
             topPanel.Controls.Add(_highBatteryColorButton);
 
-            var controllerPanel = new Panel
+            // Use FlowLayoutPanel for automatic layout of multiple controllers
+            var controllerPanel = new FlowLayoutPanel
             {
                 Name = "ControllerPanel",
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                BackColor = Color.FromArgb(45, 45, 48)
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                BackColor = Color.FromArgb(45, 45, 48),
+                Padding = new Padding(5)
             };
 
             var statusLabel = new Label
@@ -316,7 +320,7 @@ namespace DS4BatteryMapper
         {
             Trace.WriteLine($"[MainForm] Entering UpdateControllerPanel with {controllers?.Count ?? 0} controller(s)");
 
-            var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as Panel;
+            var controllerPanel = this.Controls.Find("ControllerPanel", true).FirstOrDefault() as FlowLayoutPanel;
             var statusLabel = this.Controls.Find("StatusLabel", true).FirstOrDefault() as Label;
 
             if (controllerPanel == null)
@@ -346,14 +350,12 @@ namespace DS4BatteryMapper
                 return;
             }
 
-            int yOffset = 10;
             foreach (var controller in controllers)
             {
                 try
                 {
-                    var controllerUI = CreateControllerUI(controller, yOffset);
+                    var controllerUI = CreateControllerUI(controller);
                     controllerPanel.Controls.Add(controllerUI);
-                    yOffset += 130;
                 }
                 catch (Exception uiEx)
                 {
@@ -367,17 +369,17 @@ namespace DS4BatteryMapper
             Trace.WriteLine($"[MainForm] Displaying {controllers.Count} controller(s)");
         }
 
-        private Panel CreateControllerUI(DS4Controller controller, int yPosition)
+        private Panel CreateControllerUI(DS4Controller controller)
         {
             var battery = Math.Max(0, Math.Min(100, controller.BatteryPercentage));
             var color = BatteryToColor(battery);
 
             var panel = new Panel
             {
-                Location = new Point(10, yPosition),
                 Size = new Size(550, 110),
                 BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.FromArgb(37, 37, 38)
+                BackColor = Color.FromArgb(37, 37, 38),
+                Margin = new Padding(0, 5, 0, 5)  // Add spacing between controller panels
             };
 
             // Controller name
