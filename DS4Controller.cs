@@ -125,9 +125,18 @@ namespace DS4BatteryMapper
                                 try
                                 {
                                     var ret = writeFeatureMethod.Invoke(_device, new object[] { report65 });
-                                    Trace.WriteLine($"SetLightbar attempt via WriteFeatureData (65): rumble={rumble.l:X2},{rumble.r:X2} rumbleOff={rumbleOff[0]},{rumbleOff[1]} rgbOff={rgbOff[0]},{rgbOff[1]},{rgbOff[2]} -> returned={ret ?? "null"}");
-                                    if (ret is bool b && b) featureResult = true;
-                                    else if (ret != null) featureResult = true; // best-effort assume success
+                                    // Treat only an explicit boolean 'true' as success. Some HidLibrary implementations
+                                    // return non-bool values or boxed bool false; we must not treat non-bool/false as success.
+                                    if (ret is bool b)
+                                    {
+                                        featureResult = b;
+                                        Trace.WriteLine($"SetLightbar attempt via WriteFeatureData (65): rumble={rumble.l:X2},{rumble.r:X2} rumbleOff={rumbleOff[0]},{rumbleOff[1]} rgbOff={rgbOff[0]},{rgbOff[1]},{rgbOff[2]} -> returned=(bool){b}");
+                                    }
+                                    else
+                                    {
+                                        Trace.WriteLine($"SetLightbar attempt via WriteFeatureData (65): rumble={rumble.l:X2},{rumble.r:X2} rumbleOff={rumbleOff[0]},{rumbleOff[1]} rgbOff={rgbOff[0]},{rgbOff[1]},{rgbOff[2]} -> returned=(non-bool){ret ?? "null"} (treated as failure)");
+                                        featureResult = false;
+                                    }
                                 }
                                 catch (TargetInvocationException tie)
                                 {
