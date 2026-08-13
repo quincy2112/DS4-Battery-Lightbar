@@ -1,6 +1,6 @@
 # DS4 Battery Lightbar Mapper
 
-A Windows application that reads connected DualShock 4 (DS4) controller(s) and maps the lightbar color to the battery percentage.
+A Windows application that reads connected DualShock 4 (DS4) controller(s) and maps the lightbar color to the battery percentage. Entirely vibecoded. 
 
 ## Features
 
