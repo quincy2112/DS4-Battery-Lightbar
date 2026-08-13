@@ -17,7 +17,9 @@ namespace DS4BatteryMapper
         {
             _device = device;
             _lastInputReport = new byte[64];
-            UpdateBatteryStatus();
+            BatteryPercentage = 0; // default until first successful read
+            // IMPORTANT: Do NOT perform blocking I/O (UpdateBatteryStatus) in the constructor.
+            // Reads/writes are performed during the scheduled poll with timeouts.
         }
 
         public void UpdateBatteryStatus()

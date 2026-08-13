@@ -32,7 +32,7 @@ namespace DS4BatteryMapper
         private void InitializeUI()
         {
             this.Text = "DS4 Battery Lightbar Mapper";
-            this.Size = new Size(600, 400);
+            this.Size = new Size(600, 420);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(45, 45, 48);
             this.ForeColor = Color.White;
@@ -48,12 +48,28 @@ namespace DS4BatteryMapper
             };
             mainPanel.Controls.Add(titleLabel);
 
+            var refreshBtn = new Button
+            {
+                Text = "Refresh",
+                Location = new Point(480, 10),
+                Size = new Size(80, 28),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            refreshBtn.Click += (s, e) =>
+            {
+                Trace.WriteLine("[MainForm] Refresh clicked - forcing poll");
+                // Call poll tick directly to force immediate enumeration + poll
+                PollControllersTick(null, EventArgs.Empty);
+            };
+            mainPanel.Controls.Add(refreshBtn);
+
             var controllerPanel = new Panel
             {
                 Name = "ControllerPanel",
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                BackColor = Color.FromArgb(45, 45, 48)
+                BackColor = Color.FromArgb(45, 45, 48),
+                Location = new Point(0, 50)
             };
             mainPanel.Controls.Add(controllerPanel);
 
@@ -74,8 +90,8 @@ namespace DS4BatteryMapper
 
         private void StartMonitoring()
         {
-            // UI timer: frequent refresh of UI from cached controller objects (no blocking I/O)
-            _uiTimer = new Timer { Interval = 500 };
+            // UI timer: less frequent to avoid racing enumeration (2s)
+            _uiTimer = new Timer { Interval = 2000 };
             _uiTimer.Tick += UIUpdateTick!;
             _uiTimer.Start();
 
@@ -84,7 +100,7 @@ namespace DS4BatteryMapper
             _pollTimer.Tick += PollControllersTick!;
             _pollTimer.Start();
 
-            Trace.WriteLine("Monitoring started: UI=500ms, Poll=15000ms");
+            Trace.WriteLine("Monitoring started: UI=2000ms, Poll=15000ms");
         }
 
         // UI-only update (fast). Enumerates controllers but does not perform blocking reads/writes.
