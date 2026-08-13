@@ -13,7 +13,6 @@ namespace DS4BatteryMapper
         private byte[] _lastInputReport;
 
         public string DeviceName => _device?.Description ?? "Unknown";
-        // -1 means unknown / not yet read
         public int BatteryPercentage { get; private set; }
         public DateTime? LastSeen { get; private set; }
 
@@ -21,7 +20,7 @@ namespace DS4BatteryMapper
         {
             _device = device;
             _lastInputReport = new byte[64];
-            BatteryPercentage = -1; // default until first successful read
+            BatteryPercentage = -1;
             LastSeen = null;
         }
 
@@ -47,7 +46,6 @@ namespace DS4BatteryMapper
                         BatteryPercentage = Math.Min(100, Math.Max(0, BatteryPercentage));
                         LastSeen = DateTime.Now;
                         Trace.WriteLine($"[DS4Controller] {DeviceName} battery read: {BatteryPercentage}%");
-                        Trace.WriteLine($"[DS4Controller] Raw input ({_lastInputReport.Length}): {BitConverter.ToString(_lastInputReport)}");
                     }
                 }
             }
@@ -57,12 +55,29 @@ namespace DS4BatteryMapper
             }
         }
 
-        // P/Invoke fallbacks for native HID APIs
-        [DllImport("hid.dll", SetLastError = true)]
-        private static extern bool HidD_SetFeature(IntPtr hidDeviceObject, byte[] reportBuffer, int reportBufferLength);
+        /// <summary>
+        /// Compute CRC-32 (ISO_HDLC) checksum.
+        /// Based on the polynomial used in zlib and the ds4-dashboard implementation.
+        /// </summary>
+        private static uint ComputeCrc32(byte[] data, int length)
+        {
+            // CRC-32 ISO_HDLC polynomial: 0x04C11DB7
+            uint crc = 0xFFFFFFFF;
 
-        [DllImport("hid.dll", SetLastError = true)]
-        private static extern bool HidD_SetOutputReport(IntPtr hidDeviceObject, byte[] reportBuffer, int reportBufferLength);
+            for (int i = 0; i < length; i++)
+            {
+                crc ^= data[i];
+                for (int j = 0; j < 8; j++)
+                {
+                    if ((crc & 1) != 0)
+                        crc = (crc >> 1) ^ 0xEDB88320;
+                    else
+                        crc = crc >> 1;
+                }
+            }
+
+            return crc ^ 0xFFFFFFFF;
+        }
 
         public void SetLightbar(byte red, byte green, byte blue)
         {
@@ -79,7 +94,6 @@ namespace DS4BatteryMapper
                 if (!_device.IsOpen)
                     _device.OpenDevice();
 
-                // Log capabilities for debugging
                 try
                 {
                     var caps = _device.Capabilities;
@@ -87,268 +101,81 @@ namespace DS4BatteryMapper
                 }
                 catch (Exception) { /* ignore */ }
 
-                var writeFeatureMethod = _device.GetType().GetMethod("WriteFeatureData");
-                var writeFeatureAvailable = writeFeatureMethod != null;
+                // Detect connection type (USB vs Bluetooth) from the input report structure
+                // USB reports start with 0x01, Bluetooth with 0x11
+                bool isBluetooth = (_lastInputReport.Length > 0 && _lastInputReport[0] == 0x11);
+                Trace.WriteLine($"SetLightbar: Detected connection type = {(isBluetooth ? "Bluetooth" : "USB")}");
 
-                // Candidates for permutations
-                var rumblePairs = new (byte l, byte r)[] { (0x00, 0x00), (0x10, 0x10), (0x40, 0x40), (0x7F, 0x7F) };
-                var rumbleOffsetCandidates = new[] { new[] { 3, 4 }, new[] { 4, 5 }, new[] { 6, 7 } };
-                var rgbOffsetCandidates = new[] { new[] { 8, 9, 10 }, new[] { 6, 7, 8 }, new[] { 9, 10, 11 }, new[] { 10, 11, 12 } };
-                var reportIdCandidates = new byte[] { 0x11, 0x05 };
-                var headerCandidates = new byte[] { 0xC0, 0x02, 0x00 };
-                var outputReportLens = new[] { 78, 64, (_device.Capabilities?.OutputReportByteLength ?? 32) };
-
-                // 1) Try 65-byte feature report permutations (WriteFeatureData + native HidD_SetFeature)
-                foreach (var rumble in rumblePairs)
+                if (isBluetooth)
                 {
-                    foreach (var rumbleOff in rumbleOffsetCandidates)
+                    // Bluetooth: 78-byte report with CRC-32 checksum
+                    var report = new byte[78];
+                    report[0] = 0x11;       // Report ID
+                    report[1] = 0x80;       // Header (enables output mode)
+                    report[3] = 0xFF;       // Enable flags (Rumble + Lightbar + others)
+                    
+                    report[6] = 0x00;       // Small rumble (set to 0 for now, can adjust)
+                    report[7] = 0x00;       // Large rumble
+                    report[8] = red;
+                    report[9] = green;
+                    report[10] = blue;
+
+                    // Compute CRC-32 checksum over first 75 bytes (prepended with 0xA2)
+                    var crcBuf = new byte[75];
+                    crcBuf[0] = 0xA2;       // Magic prefix
+                    Buffer.BlockCopy(report, 0, crcBuf, 1, 74);
+
+                    uint crc = ComputeCrc32(crcBuf, 75);
+                    report[74] = (byte)(crc & 0xFF);
+                    report[75] = (byte)((crc >> 8) & 0xFF);
+                    report[76] = (byte)((crc >> 16) & 0xFF);
+                    report[77] = (byte)((crc >> 24) & 0xFF);
+
+                    Trace.WriteLine($"SetLightbar BT: Sending 78-byte report with CRC 0x{crc:X8}");
+                    Trace.WriteLine($"SetLightbar BT: Report bytes [0..10]: {BitConverter.ToString(report, 0, 11)}");
+                    Trace.WriteLine($"SetLightbar BT: CRC bytes [74..77]: {BitConverter.ToString(report, 74, 4)}");
+
+                    bool ok = _device.Write(report);
+                    Trace.WriteLine($"SetLightbar BT: Write returned {ok}");
+
+                    if (ok)
                     {
-                        foreach (var rgbOff in rgbOffsetCandidates)
-                        {
-                            var report65 = new byte[65];
-                            report65[0] = 0x11; // typical report id
-                            report65[1] = 0xC0; // typical header
+                        Trace.WriteLine("SetLightbar: Bluetooth lightbar update sent successfully!");
+                        return;
+                    }
+                }
+                else
+                {
+                    // USB: 32-byte report, no CRC needed
+                    var report = new byte[32];
+                    report[0] = 0x05;       // Report ID for USB
+                    report[1] = 0xFF;       // Enable Rumble, Lightbar, and Flash
+                    
+                    report[4] = 0x00;       // Small rumble
+                    report[5] = 0x00;       // Large rumble
+                    report[6] = red;
+                    report[7] = green;
+                    report[8] = blue;
 
-                            if (rumbleOff[0] < report65.Length) report65[rumbleOff[0]] = rumble.l;
-                            if (rumbleOff[1] < report65.Length) report65[rumbleOff[1]] = rumble.r;
+                    Trace.WriteLine($"SetLightbar USB: Sending 32-byte report");
+                    Trace.WriteLine($"SetLightbar USB: Report bytes [0..8]: {BitConverter.ToString(report, 0, 9)}");
 
-                            if (rgbOff[0] < report65.Length) report65[rgbOff[0]] = red;
-                            if (rgbOff[1] < report65.Length) report65[rgbOff[1]] = green;
-                            if (rgbOff[2] < report65.Length) report65[rgbOff[2]] = blue;
+                    bool ok = _device.Write(report);
+                    Trace.WriteLine($"SetLightbar USB: Write returned {ok}");
 
-                            // Managed WriteFeatureData
-                            if (writeFeatureAvailable)
-                            {
-                                try
-                                {
-                                    var ret = writeFeatureMethod.Invoke(_device, new object[] { report65 });
-                                    if (ret is bool b && b)
-                                    {
-                                        Trace.WriteLine($"SetLightbar success via WriteFeatureData (65): rumble={rumble.l:X2},{rumble.r:X2} rumbleOff={rumbleOff[0]},{rumbleOff[1]} rgbOff={rgbOff[0]},{rgbOff[1]},{rgbOff[2]}");
-                                        return;
-                                    }
-                                    else
-                                    {
-                                        Trace.WriteLine($"SetLightbar attempt via WriteFeatureData (65): returned={(ret == null ? "null" : ret.ToString())}");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    Trace.WriteLine($"WriteFeatureData invocation error: {ex.Message}");
-                                }
-                            }
-
-                            // Native HidD_SetFeature fallback
-                            try
-                            {
-                                var devicePath = GetDevicePath();
-                                if (!string.IsNullOrEmpty(devicePath))
-                                {
-                                    var h = NativeMethods.CreateFile(devicePath, NativeMethods.GENERIC_WRITE | NativeMethods.GENERIC_READ,
-                                        NativeMethods.FILE_SHARE_READ | NativeMethods.FILE_SHARE_WRITE, IntPtr.Zero, NativeMethods.OPEN_EXISTING, 0, IntPtr.Zero);
-
-                                    if (h != NativeMethods.INVALID_HANDLE_VALUE)
-                                    {
-                                        try
-                                        {
-                                            var nativeResult = HidD_SetFeature(h, report65, report65.Length);
-                                            Trace.WriteLine($"SetLightbar HidD_SetFeature(native) attempt (65): rumble={rumble.l:X2},{rumble.r:X2} rgbOff={rgbOff[0]},{rgbOff[1]},{rgbOff[2]} returned: {nativeResult}");
-                                            NativeMethods.CloseHandle(h);
-                                            if (nativeResult) return;
-                                        }
-                                        catch (Exception nex)
-                                        {
-                                            Trace.WriteLine($"HidD_SetFeature native error: {nex.Message}");
-                                        }
-                                    }
-                                    else
-                                    {
-                                        Trace.WriteLine($"CreateFile for HidD_SetFeature failed: {devicePath}");
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Trace.WriteLine($"HidD_SetFeature fallback exception: {ex.Message}");
-                            }
-                        }
+                    if (ok)
+                    {
+                        Trace.WriteLine("SetLightbar: USB lightbar update sent successfully!");
+                        return;
                     }
                 }
 
-                // 2) Native HidD_SetOutputReport permutations (try with and without leading report id)
-                foreach (var len in outputReportLens.Distinct())
-                {
-                    int realLen = Math.Max(32, len);
-                    foreach (var rid in reportIdCandidates)
-                    {
-                        foreach (var header in headerCandidates)
-                        {
-                            foreach (var rumble in rumblePairs)
-                            {
-                                foreach (var rgbOff in rgbOffsetCandidates)
-                                {
-                                    var report = new byte[realLen];
-                                    report[0] = rid;
-                                    if (report.Length > 1) report[1] = header;
-
-                                    // place rumble at 3/4 if possible
-                                    if (report.Length > 5)
-                                    {
-                                        report[3] = rumble.l;
-                                        report[4] = rumble.r;
-                                    }
-
-                                    if (rgbOff[0] < report.Length) report[rgbOff[0]] = red;
-                                    if (rgbOff[1] < report.Length) report[rgbOff[1]] = green;
-                                    if (rgbOff[2] < report.Length) report[rgbOff[2]] = blue;
-
-                                    try
-                                    {
-                                        var devicePath = GetDevicePath();
-                                        if (!string.IsNullOrEmpty(devicePath))
-                                        {
-                                            var h = NativeMethods.CreateFile(devicePath, NativeMethods.GENERIC_WRITE | NativeMethods.GENERIC_READ,
-                                                NativeMethods.FILE_SHARE_READ | NativeMethods.FILE_SHARE_WRITE, IntPtr.Zero, NativeMethods.OPEN_EXISTING, 0, IntPtr.Zero);
-
-                                            if (h != NativeMethods.INVALID_HANDLE_VALUE)
-                                            {
-                                                try
-                                                {
-                                                    // First try the full buffer
-                                                    var outRes = HidD_SetOutputReport(h, report, report.Length);
-                                                    Trace.WriteLine($"SetLightbar HidD_SetOutputReport native attempt: len={report.Length}, rid=0x{rid:X2}, header=0x{header:X2}, rgbOff={rgbOff[0]},{rgbOff[1]},{rgbOff[2]}, rumble={rumble.l:X2},{rumble.r:X2} -> {outRes}");
-                                                    if (outRes)
-                                                    {
-                                                        NativeMethods.CloseHandle(h);
-                                                        return;
-                                                    }
-
-                                                    // Also try omitting leading report id (some stacks expect that)
-                                                    if (report.Length > 1)
-                                                    {
-                                                        var shorter = report.Skip(1).ToArray();
-                                                        var outRes2 = HidD_SetOutputReport(h, shorter, shorter.Length);
-                                                        Trace.WriteLine($"SetLightbar HidD_SetOutputReport native attempt (no-report-id): len={shorter.Length}, rgbOffAdjusted={rgbOff[0]-1},{rgbOff[1]-1},{rgbOff[2]-1} -> {outRes2}");
-                                                        if (outRes2)
-                                                        {
-                                                            NativeMethods.CloseHandle(h);
-                                                            return;
-                                                        }
-                                                    }
-
-                                                    NativeMethods.CloseHandle(h);
-                                                }
-                                                catch (Exception nex)
-                                                {
-                                                    Trace.WriteLine($"HidD_SetOutputReport native call failed: {nex.Message}");
-                                                }
-                                            }
-                                            else
-                                            {
-                                                Trace.WriteLine($"CreateFile failed for HidD_SetOutputReport: {devicePath}");
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Trace.WriteLine($"Native output-report permutation exception: {ex.Message}");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 3) Fallback to managed Write attempts (existing permutations)
-                int[] reportLens = new[] { 78, _device.Capabilities?.OutputReportByteLength ?? 32, 32 };
-                byte[] reportIdCandidates2 = new[] { (byte)0x11, (byte)0x05 };
-                int[][] offsetCandidates = new[]
-                {
-                    new[] { 6, 7, 8 },
-                    new[] { 8, 9, 10 },
-                    new[] { 5, 6, 7 },
-                    new[] { 4, 6, 7 }
-                };
-                byte[] headerCandidates2 = new[] { (byte)0xC0, (byte)0x02, (byte)0x00 };
-
-                bool wrote = false;
-                foreach (var len2 in reportLens)
-                {
-                    int realLen = len2 > 0 ? len2 : 32;
-                    var report = new byte[realLen];
-
-                    foreach (var rid2 in reportIdCandidates2)
-                    {
-                        foreach (var header2 in headerCandidates2)
-                        {
-                            foreach (var off in offsetCandidates)
-                            {
-                                Array.Clear(report, 0, report.Length);
-
-                                if (realLen > 0) report[0] = rid2;
-                                if (report.Length > 1) report[1] = header2;
-
-                                if (off[0] < report.Length) report[off[0]] = red;
-                                if (off[1] < report.Length) report[off[1]] = green;
-                                if (off[2] < report.Length) report[off[2]] = blue;
-
-                                try
-                                {
-                                    var ok = _device.Write(report);
-                                    Trace.WriteLine($"SetLightbar attempt: outLen={realLen}, rid=0x{rid2:X2}, header=0x{header2:X2}, offs={off[0]},{off[1]},{off[2]} -> Write returned {ok}");
-                                    if (ok) { wrote = true; break; }
-                                }
-                                catch (Exception wex)
-                                {
-                                    Trace.WriteLine($"SetLightbar Write exception (outLen={realLen}, rid=0x{rid2:X2}): {wex}");
-                                }
-
-                                try
-                                {
-                                    var mi = _device.GetType().GetMethod("WriteFeatureData") ?? _device.GetType().GetMethod("WriteFeature");
-                                    if (mi != null)
-                                    {
-                                        var result = mi.Invoke(_device, new object[] { report });
-                                        Trace.WriteLine($"SetLightbar attempt via {mi.Name}: outLen={realLen}, rid=0x{rid2:X2}, offs={off[0]},{off[1]},{off[2]} -> returned={result ?? "null"}");
-                                        wrote = true; // assume attempted
-                                        break;
-                                    }
-                                }
-                                catch (Exception fim)
-                                {
-                                    Trace.WriteLine($"SetLightbar feature-write exception: {fim}");
-                                }
-                            }
-                            if (wrote) break;
-                        }
-                        if (wrote) break;
-                    }
-                    if (wrote) break;
-                }
-
-                if (!wrote)
-                {
-                    Trace.WriteLine("SetLightbar: none of the permutations succeeded; device may require a driver-specific or firmware-specific report format.");
-                }
+                Trace.WriteLine("SetLightbar: Write failed for both USB and Bluetooth formats.");
             }
             catch (Exception ex)
             {
                 Trace.WriteLine($"SetLightbar: unexpected error: {ex}");
             }
-        }
-
-        private string? GetDevicePath()
-        {
-            try
-            {
-                var pathProp = _device.GetType().GetProperty("DevicePath", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (pathProp != null)
-                {
-                    return pathProp.GetValue(_device) as string;
-                }
-            }
-            catch { }
-            return null;
         }
 
         public void Dispose()
@@ -359,22 +186,5 @@ namespace DS4BatteryMapper
             }
             catch { }
         }
-    }
-
-    internal static class NativeMethods
-    {
-        public const uint GENERIC_READ = 0x80000000;
-        public const uint GENERIC_WRITE = 0x40000000;
-        public const uint FILE_SHARE_READ = 0x00000001;
-        public const uint FILE_SHARE_WRITE = 0x00000002;
-        public const uint OPEN_EXISTING = 3;
-        public static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        public static extern IntPtr CreateFile(string lpFileName, uint dwDesiredAccess, uint dwShareMode,
-            IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool CloseHandle(IntPtr hObject);
     }
 }
