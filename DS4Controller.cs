@@ -12,9 +12,9 @@ namespace DS4BatteryMapper
         private HidDevice _device;
         private byte[] _lastInputReport;
         private int _consecutiveReadFailures = 0;
-        private const int MAX_CONSECUTIVE_FAILURES = 5;  // Increased grace period
+        private const int MAX_CONSECUTIVE_FAILURES = 1;  // Mark unhealthy on first failure after grace period
         private DateTime _createdAt = DateTime.Now;
-        private const int GRACE_PERIOD_MS = 2000;  // 2 second grace period for new controllers
+        private const int GRACE_PERIOD_MS = 1000;  // 1 second grace period for new controllers
 
         public string DeviceName => _device?.Description ?? "Unknown";
         public int BatteryPercentage { get; private set; }
@@ -56,23 +56,13 @@ namespace DS4BatteryMapper
                     if (reportId == 0x00)
                     {
                         _consecutiveReadFailures++;
-                        Trace.WriteLine($"[DS4Controller] {DeviceName} got malformed report (id=0x00, len={_lastInputReport.Length}), failures={_consecutiveReadFailures}");
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} got malformed report (id=0x00, len={_lastInputReport.Length}), failures={_consecutiveReadFailures}, grace_passed={IsPassedGracePeriod()}");
                         
-                        // Only mark unhealthy after grace period + max failures
+                        // Only mark unhealthy after grace period + failure
                         if (IsPassedGracePeriod() && _consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                         {
-                            Trace.WriteLine($"[DS4Controller] {DeviceName} exceeded max consecutive failures after grace period, marking unhealthy and reopening device");
+                            Trace.WriteLine($"[DS4Controller] {DeviceName} failed after grace period, marking unhealthy");
                             IsHealthy = false;
-                            try
-                            {
-                                _device.CloseDevice();
-                                System.Threading.Thread.Sleep(100);
-                                _device.OpenDevice();
-                            }
-                            catch (Exception ex)
-                            {
-                                Trace.WriteLine($"[DS4Controller] Failed to reopen device: {ex}");
-                            }
                         }
                         return;
                     }
@@ -126,10 +116,11 @@ namespace DS4BatteryMapper
                 else
                 {
                     _consecutiveReadFailures++;
-                    Trace.WriteLine($"[DS4Controller] {DeviceName} read failed with status={data.Status}, failures={_consecutiveReadFailures}");
+                    Trace.WriteLine($"[DS4Controller] {DeviceName} read failed with status={data.Status}, failures={_consecutiveReadFailures}, grace_passed={IsPassedGracePeriod()}");
                     
                     if (IsPassedGracePeriod() && _consecutiveReadFailures >= MAX_CONSECUTIVE_FAILURES)
                     {
+                        Trace.WriteLine($"[DS4Controller] {DeviceName} marked unhealthy after failed read");
                         IsHealthy = false;
                     }
                 }
