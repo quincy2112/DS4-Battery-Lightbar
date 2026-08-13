@@ -377,7 +377,9 @@ namespace DS4BatteryMapper
 
             var panel = new Panel
             {
-                Size = new Size(550, 110),
+                Width = 550,  // Set width but let FlowLayoutPanel control height via AutoSize
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(37, 37, 38),
                 Margin = new Padding(0, 5, 0, 5)  // Add spacing between controller panels
