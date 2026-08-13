@@ -47,6 +47,33 @@ namespace DS4BatteryMapper
                         // Recognize DS4 by VID/PID for Sony (0x054C: PlayStation) and DS4 wireless PID 0x09CC
                         if (vid == 0x054C && (pid == 0x09CC || pid == 0x09C0 || pid == 0x05C4))
                         {
+                            // Verify the device can actually be opened before considering it valid
+                            bool canOpen = false;
+                            try
+                            {
+                                if (d.IsOpen)
+                                {
+                                    canOpen = true;
+                                }
+                                else
+                                {
+                                    d.OpenDevice();
+                                    canOpen = true;
+                                    d.CloseDevice();
+                                }
+                            }
+                            catch (Exception openEx)
+                            {
+                                log.Add($"[DS4Manager] Failed to open device {path}: {openEx.Message}");
+                                canOpen = false;
+                            }
+
+                            if (!canOpen)
+                            {
+                                log.Add($"[DS4Manager] Skipping unreachable DS4: {path}");
+                                continue;
+                            }
+
                             // extract a dedupe key (prefer Bluetooth address-like substring if present)
                             var key = ExtractDeviceKey(path) ?? path;
                             foundKeys.Add(key);
